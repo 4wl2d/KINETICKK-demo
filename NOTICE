@@ -1,0 +1,41 @@
+SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+KINETICKK DEMO NOTICE
+
+Copyright (C) 2026 Vladislav Tomilov.
+
+This repository holds the free demo of KINETICKK. It is licensed under the
+PolyForm Noncommercial License 1.0.0 (see LICENSE). The source is public so that it
+can be read, built, studied and changed for noncommercial purposes; it is not open
+source software in the sense of the Open Source Definition.
+
+THE FULL GAME
+
+The full game is a separate product, sold separately under its own license. That
+license, and not this one, covers the full game, its builds and any material that is
+not published in this repository.
+
+OFFICIAL DEMO BUILDS
+
+Vladislav Tomilov publishes official builds of the demo, including through
+application stores. A store's terms apply to the copies it delivers, alongside the
+license in LICENSE.
+
+CHANGES TO THIS REPOSITORY
+
+The files here are exported from the game's development repository, so pull
+requests are not merged.
+
+TRADEMARKS
+
+The license grants no rights in the KINETICKK name, logo or other branding, or in
+the name of Vladislav Tomilov. A modified version must use a clearly different name,
+remove the official logo and store artwork, and say that it is not made or endorsed
+by Vladislav Tomilov.
+
+THIRD-PARTY MATERIAL
+
+Third-party components, fonts and other material keep their own licenses, which
+this notice and LICENSE do not change. When the demo's source is published, their
+notices and license texts are published with it.
