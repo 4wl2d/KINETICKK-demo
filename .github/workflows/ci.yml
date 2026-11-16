@@ -1,0 +1,99 @@
+# SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+name: Demo CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  desktop:
+    name: Desktop and architecture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the public source boundary
+        run: python3 tools/check_demo.py
+      - name: Set up JDK 25 and its jmods
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '25.0.5+8'
+          java-package: jdk+jmods
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Test the desktop app and build a release app image
+        run: >-
+          ./gradlew :build-logic:test verifyArchitecture desktopTest
+          :app:desktop:createReleaseDistributable
+          --no-daemon --stacktrace
+      - name: Verify the desktop release distribution
+        run: python3 tools/check_demo.py --desktop-dist app/desktop/build/compose/binaries/main-release/app
+      - name: Launch the packaged demo under a virtual display
+        env:
+          SKIKO_RENDER_API: SOFTWARE
+        run: xvfb-run -a 'app/desktop/build/compose/binaries/main-release/app/KINETICKK Demo/bin/KINETICKK Demo' --smoke-test
+
+  browser:
+    name: Browser and release assets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test browser packaging and release integrity
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Set up JDK 25
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '25.0.5+8'
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Set up Chrome for Testing
+        id: chrome
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        with:
+          chrome-version: '157.0.8103.78'
+      - name: Allow Chrome user-namespace sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Test Wasm and build the browser distribution
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+        run: >-
+          ./gradlew wasmJsBrowserTest :app:web:wasmJsBrowserDistribution
+          --no-daemon --max-workers=1 --stacktrace
+      - name: Check the release distribution and package its assets
+        run: |
+          dist=app/web/build/dist/wasmJs/productionExecutable
+          python3 tools/check_demo.py --web-dist "$dist"
+          tag=()
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            tag=(--tag "$GITHUB_REF_NAME")
+          fi
+          python3 .github/scripts/web_release.py package --root "$dist" --output web-release "${tag[@]}"
+      - name: Archive assets for the release owner
+        if: github.event_name != 'pull_request' && github.repository == '4wl2d/KINETICKK-demo'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: demo-web-release-${{ github.run_id }}
+          path: web-release/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7

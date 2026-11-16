@@ -1,0 +1,95 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.nucleus.render
+
+import kinetickk.ball.content.api.BuildTag
+import kinetickk.ball.content.api.ReactionId
+import kinetickk.ball.content.api.RelicId
+import kinetickk.ball.content.api.RelicPairingId
+import kinetickk.ball.content.api.StatusElement
+import kinetickk.foundation.collections.ImmutableList
+import kinetickk.foundation.collections.immutableListOf
+
+/** How two bound relics interact: a named pairing, or the generic key rule. */
+enum class RelicLinkKind { CONCORD, DISCORD, HARMONY, DISSONANCE }
+
+data class RelicLinkProjection(
+    val first: RelicId,
+    val second: RelicId,
+    val kind: RelicLinkKind,
+    /** The named pairing, when one exists; presentation hides its name until [discovered]. */
+    val pairing: RelicPairingId?,
+    val discovered: Boolean,
+)
+
+data class SeveredRelicProjection(val id: RelicId, val remaining: Float)
+
+/** Immutable presentation of the compiled build, produced once per accepted frame that changes it. */
+data class BuildProjection(
+    val tagPoints: ImmutableList<Int> = immutableListOf(),
+    val tagTiers: ImmutableList<Int> = immutableListOf(),
+    val affinity: ImmutableList<Int> = immutableListOf(),
+    val affinityTiers: ImmutableList<Int> = immutableListOf(),
+    val dominant: StatusElement? = null,
+    val secondary: StatusElement? = null,
+    val links: ImmutableList<RelicLinkProjection> = immutableListOf(),
+    /** Upside multiplier per RelicId ordinal (1 when unbound). */
+    val relicUpsides: ImmutableList<Float> = immutableListOf(),
+    val severed: ImmutableList<SeveredRelicProjection> = immutableListOf(),
+    /** Owned items whose effects bound relic liabilities disable entirely. */
+    val suppressedItemIds: ImmutableList<Int> = immutableListOf(),
+    val surgedItemIds: ImmutableList<Int> = immutableListOf(),
+    val reachableReactions: ImmutableList<ReactionId> = immutableListOf(),
+    val stormCharge: Float = 0f,
+    val invulnerable: Boolean = false,
+    val overdriveBurnout: Boolean = false,
+    val breakThresholds: ImmutableList<Int> = immutableListOf(),
+    /** Relic opportunities claimed this run, the open offer included (the budget is the content's Relic policy). */
+    val relicClaims: Int = 0,
+    /** No further Relic opportunity fits the run's budget: every one is claimed, queued or lying on the field. */
+    val relicBudgetSpent: Boolean = false,
+    /** Relic slots sealed by a Meld this run; the content's Relic policy prices each Meld's bonus. */
+    val meldedSlots: Int = 0,
+    /** The run made every weapon change it may (Totem chests and weapon sites then only amplify). */
+    val weaponChangesSpent: Boolean = false,
+) {
+    fun tagPoints(tag: BuildTag): Int = tagPoints.getOrElse(tag.ordinal) { 0 }
+    fun tagTier(tag: BuildTag): Int = tagTiers.getOrElse(tag.ordinal) { 0 }
+    fun affinity(element: StatusElement): Int = affinity.getOrElse(element.ordinal) { 0 }
+    fun affinityTier(element: StatusElement): Int = affinityTiers.getOrElse(element.ordinal) { 0 }
+    fun relicUpside(id: RelicId): Float = relicUpsides.getOrElse(id.ordinal) { 1f }
+    fun breakThreshold(element: StatusElement): Int = breakThresholds.getOrElse(element.ordinal) { 0 }
+}
+
+/** A build consequence of taking an offered card. */
+enum class ForecastKind { SUPPRESSED, REACTION, TAG_TIER, AFFINITY, CONCORD, DISCORD, HARMONY, DISSONANCE }
+
+data class BuildForecast(
+    val kind: ForecastKind,
+    val tag: BuildTag? = null,
+    val element: StatusElement? = null,
+    val reaction: ReactionId? = null,
+    val pairing: RelicPairingId? = null,
+    val relic: RelicId? = null,
+    val before: Int = 0,
+    val after: Int = 0,
+    val discovered: Boolean = true,
+)
+
+/**
+ * What links the equipped weapon to the build right now (SPEC 10.2): points in its two tags and the
+ * power they add, whether the character is its signature, the bound Relic carrying its key, the element
+ * its hits apply or adopt, its scaling multiplier and how many of its three mastery forms are open
+ * ([activeMasteryForm] is the latest one's content text).
+ */
+data class WeaponSynergyProjection(
+    val tagPoints: Int = 0,
+    val tagBonus: Float = 0f,
+    val signatureActive: Boolean = false,
+    val harmonizingRelic: RelicId? = null,
+    val infusionElement: StatusElement? = null,
+    val scalingMultiplier: Float = 1f,
+    val masteryForms: Int = 0,
+    val activeMasteryForm: String? = null,
+)

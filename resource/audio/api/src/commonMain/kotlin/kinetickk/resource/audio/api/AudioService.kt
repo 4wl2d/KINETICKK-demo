@@ -1,0 +1,88 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.resource.audio.api
+
+enum class ToneWave {
+    SINE,
+    SQUARE,
+    SAW,
+    TRIANGLE,
+}
+
+object ToneRequestLimits {
+    const val MIN_FREQUENCY_HZ: Float = 20f
+    const val MAX_FREQUENCY_HZ: Float = 20_000f
+    const val MIN_DURATION_SECONDS: Float = 0.001f
+    const val MAX_DURATION_SECONDS: Float = 1f
+    const val MIN_GAIN: Float = 0f
+    const val MAX_GAIN: Float = 1f
+}
+
+/** Validated mechanical work accepted by the platform audio resource. */
+data class ToneRequest(
+    val frequencyHz: Float,
+    val durationSeconds: Float,
+    val gain: Float,
+    val wave: ToneWave,
+) {
+    init {
+        require(
+            frequencyHz.isFinite() &&
+                frequencyHz >= ToneRequestLimits.MIN_FREQUENCY_HZ &&
+                frequencyHz <= ToneRequestLimits.MAX_FREQUENCY_HZ,
+        ) {
+            "Tone frequency must be finite and between 20 and 20,000 Hz"
+        }
+        require(
+            durationSeconds.isFinite() &&
+                durationSeconds >= ToneRequestLimits.MIN_DURATION_SECONDS &&
+                durationSeconds <= ToneRequestLimits.MAX_DURATION_SECONDS,
+        ) {
+            "Tone duration must be finite and between 0.001 and 1 second"
+        }
+        require(gain.isFinite() && gain in ToneRequestLimits.MIN_GAIN..ToneRequestLimits.MAX_GAIN) {
+            "Tone gain must be finite and between 0 and 1"
+        }
+    }
+}
+
+/** The persisted preference slice observed by application-owned audio. */
+data class AudioPreferences(
+    val soundEnabled: Boolean = true,
+    val musicEnabled: Boolean = true,
+    val masterVolume: Float = 0.65f,
+)
+
+/** Application-scoped lifecycle, bounded effect playback and the music clock. */
+interface AudioService {
+    /** Prepares the whole catalog (effects and music) plus [requests]; never plays or unlocks. */
+    suspend fun prepare(requests: List<ToneRequest> = emptyList()) = Unit
+
+    fun updatePreferences(preferences: AudioPreferences)
+
+    /**
+     * Effects only: more than 32 ids drop all; stable priority sort; the first 3 distinct play. Never moves music.
+     * The list is read during the call only, so a caller may reuse it.
+     */
+    fun play(sounds: List<SoundId>) = Unit
+
+    /** Music only: advances the sequencer by one display frame; delta <= 0 plays nothing; resets while music is off. */
+    fun tick(realDeltaSeconds: Float) = Unit
+
+    fun ensureUnlocked()
+    fun close()
+}
+
+/** Plays one effect through an immutable single-sound list, so a lone cue allocates nothing. */
+fun AudioService.play(sound: SoundId) {
+    play(SINGLE_SOUNDS[sound.ordinal])
+}
+
+/** A menu press: unlocks audio inside the user's gesture, then plays [sound]; it never moves the music clock. */
+fun AudioService.playUiEffect(sound: SoundId) {
+    ensureUnlocked()
+    play(sound)
+}
+
+private val SINGLE_SOUNDS: List<List<SoundId>> = SoundId.entries.map { listOf(it) }

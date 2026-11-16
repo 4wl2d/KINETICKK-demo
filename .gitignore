@@ -1,0 +1,15 @@
+.gradle/
+.kotlin/
+.kotlin-js-store/
+build/
+out/
+node_modules/
+__pycache__/
+.playwright-cli/
+.idea/
+.DS_Store
+.env
+.env.*
+local.properties
+*.jks
+*.keystore

@@ -1,0 +1,113 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.interaction.localization
+
+import kinetickk.foundation.common.localization.TextResource
+
+/**
+ * Copy for the redesigned in-run overlays (rewards, pause, run report). Sentence case: the text
+ * styles apply display casing. No separators, arrows or index numbers.
+ */
+internal enum class OverlayRedesignText(
+    override val english: String,
+    override val russian: String,
+) : TextResource {
+    LevelLabel("Lvl", "Ур."),
+    Take("Take", "Взять"),
+    Reroll("Reroll", "Обновить"),
+    Build("Build", "Сборка"),
+    Codex("Codex", "Кодекс"),
+    Rank("Rank {0}", "Ранг {0}"),
+    RankLabel("Rank", "Ранг"),
+    StackCount("Stack {0}/{1}", "Копии {0}/{1}"),
+    // Active items: the rank their effect reaches, the active and passive parts, the slot chip (its key cap follows
+    // the label; touch names the slot by number), the slot replacement prompt (its rank stays with its number and the
+    // Russian preposition with its noun) and its keep card's band, the category of what it keeps.
+    ActiveRank("Rank {0}/{1}", "Ранг {0}/{1}"),
+    ActivePart("Active", "Активный эффект"),
+    Actives("Actives", "Активные"),
+    PassivePart("Passive", "Пассивный эффект"),
+    ActiveChip("Active", "Актив"),
+    ActiveSlotChip("Slot {0}", "Ячейка {0}"),
+    ActiveReplacesChip("Replaces a slot", "Заменит ячейку"),
+    ReplaceActive("Replace {0}", "Заменить: {0}"),
+    ActiveIncoming("{0} takes this slot at rank\u00A01", "{0} займёт эту ячейку с\u00A0рангом\u00A01"),
+    KeepLoadout("Keep loadout", "Оставить набор"),
+    KeepLoadoutEffect("Every active stays and {0} is salvaged for matter", "Все активные эффекты остаются, {0} идёт в материю"),
+    KeepLoadoutMatter("Every active stays and {0} is salvaged for +{1} matter", "Все активные эффекты остаются, {0} даёт +{1} материи"),
+    Relics("Relics", "Реликвии"),
+    Weapon("Weapon", "Оружие"),
+    Stats("Stats", "Показатели"),
+    Interactions("Interactions", "Взаимодействия"),
+    Offerings("Offerings", "Подношения"),
+    UpgradeKind("Upgrade", "Улучшение"),
+    ChangeKind("Change", "Смена"),
+    NewKind("New", "Новое"),
+    Equipped("Equipped", "Экипировано"),
+    Signature("Signature", "Фирменное"),
+    MasteryInfo(
+        "A weapon change, once per run, keeps {1}% of the weapon level. Mastery milestones: {0}.",
+        "Смена оружия, одна за забег, сохраняет {1}% уровня оружия. Этапы мастерства: {0}.",
+    ),
+    WeaponChangeSpent("Weapon change spent this run", "Смена оружия в этом забеге израсходована"),
+    // Effect lines that replace the game's step-by-step choice descriptions on offers.
+    FocusArtifacts("Matching artifacts and a repair", "Подходящие артефакты и ремонт"),
+    FocusRelics("Relics of this aspect", "Реликвии этого аспекта"),
+    FocusWeapons("Upgrade or a matching weapon", "Улучшение или подходящее оружие"),
+    ChangeWeaponEffect("Other weapon systems on offer", "Другие оружейные системы на выбор"),
+    MeldEffect("Seals the empty slot for this run: damage dealt +{0}%, max integrity +{1}%", "Запечатывает пустую ячейку до конца забега: урон +{0}%, макс. целостность +{1}%"),
+    MeldTotal("Meld ×{0}: damage +{1}%, integrity +{2}%", "Слияние ×{0}: урон +{1}%, целостность +{2}%"),
+    ScrollableReport("Scrollable run statistics", "Прокручиваемая статистика забега"),
+    Bind("Bind", "Связать"),
+    Replace("Replace", "Заменить"),
+    Meld("Meld", "Слить"),
+    RankUp("Rank up", "Повысить ранг"),
+    Salvage("Salvage", "Извлечь"),
+    FreeSlot("Free slot", "Свободно"),
+    Decline("Decline", "Отказаться"),
+    RelicChoices("Relic choices", "Выбор реликвий"),
+    SalvageResonance("Salvage resonance", "Утилизировать резонанс"),
+    SalvageResonanceEffect("No open slot: the resonance becomes +{0} matter", "Нет свободной ячейки: резонанс даёт +{0} материи"),
+    // Relic links: named pairings stay unknown until met; the generic key rule is always visible.
+    Harmony("Harmony", "Гармония"),
+    Dissonance("Dissonance", "Диссонанс"),
+    HarmonyEffect("A shared key strengthens both upsides by {0}%", "Общий ключ усиливает оба преимущества на {0}%"),
+    DissonanceEffect("Opposed keys weaken both upsides by {0}%", "Противоположные ключи ослабляют оба преимущества на {0}%"),
+    UnknownConcordEffect("An unknown pairing amplifies these relics", "Неизвестное сочетание усиливает эти реликвии"),
+    UnknownDiscordEffect("An unknown pairing interferes with these relics", "Неизвестное сочетание мешает этим реликвиям"),
+    Surged("Surged", "Усиленный"),
+    Risk("Risk", "Риск"),
+    // Reward card blocks: a relic's mandatory cost, offers disabled by bound relics, relic links.
+    Cost("Cost", "Цена"),
+    Suppressed("Suppressed", "Подавлено"),
+    CostStays("Cost stays {0} s", "Цена держится {0} с"),
+    Upside("Upside", "Преимущество"),
+    Attuned("Attuned", "Созвучие"),
+    VictoryTitleTop("Architect", "Архитектор"),
+    VictoryTitleBottom("Dismantled", "Разобран"),
+    DefeatTitleTop("Core", "Ядро"),
+    DefeatTitleBottom("Broken", "Разбито"),
+    MatterBanked("Matter banked", "Материя в банк"),
+    Bank("Bank", "Банк"),
+    BankInfo(
+        "Matter banks on victory, on death and when you quit a run.",
+        "Материя попадает в банк при победе, при гибели и при выходе из забега.",
+    ),
+    Menu("Menu", "Меню"),
+    RunTimeShort("Run time", "Время"),
+    DestroyedShort("Destroyed", "Уничтожено"),
+    ElitesShort("Elites", "Элита"),
+    MatterShort("Matter", "Материя"),
+    ChainShort("Best chain", "Лучшая серия"),
+    DamageShort("Damage", "Урон"),
+    // The report of a Baby mode run: nothing is counted.
+    NotCounted("Not counted", "Не засчитано"),
+    NotCountedInfo(
+        "A Baby mode run counts nothing: no Matter, Rank, Codex entries, unlocks or achievements.",
+        "Забег в режиме малыша ничего не засчитывает: ни материю, ни ранг, ни записи кодекса, ни открытия, ни достижения.",
+    ),
+    MatterNotBanked("Matter not banked", "Материя не сохранена"),
+    // The report of a run Core Freeze ended: the rule that ended it.
+    CoreFrozenCause("Speed stayed under {0} for {1} s", "Скорость была ниже {0} {1} с подряд"),
+}

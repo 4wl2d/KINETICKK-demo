@@ -1,0 +1,122 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.impl
+
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import kinetickk.ball.content.api.GameplayContentSnapshot
+import kinetickk.ball.gameplay.api.GameplayInteractionPulse
+import kinetickk.ball.gameplay.api.GameplayPresentationPort
+import kinetickk.ball.gameplay.api.GameplayQuery
+import kinetickk.ball.gameplay.api.GameplayRunPhase
+import kinetickk.ball.gameplay.api.GameplayRunPort
+import kinetickk.ball.gameplay.api.RunId
+import kinetickk.ball.gameplay.interaction.GameplayContent
+import kinetickk.ball.gameplay.interaction.GameplayInteractionOutput
+import kinetickk.ball.profile.api.ProfileReadPort
+import kinetickk.ball.profile.api.ProfileProgress
+import kinetickk.foundation.design.Kk
+import kinetickk.resource.audio.api.AudioService
+
+class DefaultGameplayFeature(
+    private val gameplayContent: GameplayContentSnapshot,
+    private val profilePort: ProfileReadPort,
+    private val profileProgress: ProfileProgress,
+    audioService: AudioService,
+    /**
+     * Seed of each run's simulation, chosen by composition: the default keeps every run identical, the
+     * application supplies a varying source so waves differ run to run. The nucleus only receives it.
+     */
+    private val seedSource: (RunId) -> Int = { DEFAULT_GAMEPLAY_SEED },
+) : GameplayCompositionComponent {
+    private val audioExecutor = ResourceGameplayAudioExecutor(audioService)
+    private var componentValue by mutableStateOf<GameComponent?>(null)
+
+    override fun createRun(
+        runId: RunId,
+    ): GameplayRunPort {
+        ensureReplacementAllowed(runId)
+        val seed = seedSource(runId)
+        return GameComponent.create(
+            runId = runId,
+            content = gameplayContent,
+            profilePort = profilePort,
+            audioExecutor = audioExecutor,
+            profileProgress = profileProgress,
+            seed = seed,
+        ).also { componentValue = it }
+    }
+
+    override fun activeRun(): GameplayRunPort? = componentValue
+
+    override fun activePresentation(): GameplayPresentationPort? = componentValue
+
+    override fun flushOnBackground() {
+        val component = componentValue ?: return
+        val status = component.query(GameplayQuery.GetRunStatus)
+        if (status.progressPending) return
+        when (status.phase) {
+            GameplayRunPhase.RUNNING, GameplayRunPhase.PAUSED, GameplayRunPhase.CHOICE ->
+                component.accept(GameplayInteractionPulse.HostBackgrounded)
+            else -> Unit
+        }
+    }
+
+    override fun pauseForClose() {
+        val component = componentValue ?: return
+        val status = component.query(GameplayQuery.GetRunStatus)
+        if (status.phase == GameplayRunPhase.RUNNING && !status.progressPending) {
+            component.accept(GameplayInteractionPulse.PauseToggled)
+        }
+        flushOnBackground()
+    }
+
+    @Composable
+    override fun Content(
+        inputEnabled: Boolean,
+        onOutput: (GameplayInteractionOutput) -> Unit,
+    ) {
+        val component = componentValue
+        if (component == null) {
+            Canvas(Modifier.fillMaxSize()) { drawRect(Kk.Ink) }
+        } else {
+            GameplayContent(
+                component = component,
+                inputEnabled = inputEnabled,
+                onOutput = onOutput,
+            )
+        }
+    }
+
+    private fun ensureReplacementAllowed(runId: RunId) {
+        val active = componentValue ?: return
+        val status = active.query(GameplayQuery.GetRunStatus)
+        check(!status.progressPending) {
+            "Cannot replace a GameplayRun with a pending Profile command"
+        }
+        when (status.phase) {
+            GameplayRunPhase.CREATED,
+            GameplayRunPhase.RUNNING,
+            GameplayRunPhase.PAUSED,
+            GameplayRunPhase.CHOICE,
+            -> error("Cannot replace a non-terminal GameplayRun")
+
+            GameplayRunPhase.GAME_OVER,
+            GameplayRunPhase.VICTORY,
+            GameplayRunPhase.EXITED,
+            -> Unit
+        }
+        require(runId.value > active.instanceId.runId.value) {
+            "Gameplay RunId must increase monotonically"
+        }
+    }
+}
+
+/** Seed of the default source; Session never supplies the simulation seed, composition may vary it. */
+internal const val DEFAULT_GAMEPLAY_SEED: Int = 731_991

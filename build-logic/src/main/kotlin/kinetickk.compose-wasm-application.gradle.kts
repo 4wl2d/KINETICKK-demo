@@ -1,0 +1,97 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+import kinetickk.gradle.packageLegalDocuments
+import kinetickk.gradle.configureSkikoWasmRuntime
+import org.gradle.api.artifacts.VersionCatalogsExtension
+import org.gradle.api.tasks.Delete
+import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.targets.js.dsl.KotlinJsBinaryMode
+import org.jetbrains.kotlin.gradle.targets.js.ir.WasmBinary
+import org.jetbrains.kotlin.gradle.targets.js.npm.npmProject
+import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpack
+
+plugins {
+    id("kinetickk.base")
+    id("org.jetbrains.kotlin.multiplatform")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+composeCompiler {
+    includeSourceInformation.set(false)
+    includeTraceMarkers.set(false)
+}
+
+val libraries = extensions.getByType<VersionCatalogsExtension>().named("libs")
+
+kotlin {
+    @OptIn(ExperimentalWasmDsl::class)
+    wasmJs {
+        val wasmModuleName = "kinetickk"
+        outputModuleName = wasmModuleName
+        browser {
+            commonWebpackConfig {
+                outputFileName = "$wasmModuleName.js"
+            }
+        }
+        val executableBinaries = binaries.executable()
+        executableBinaries.single { it.mode == KotlinJsBinaryMode.DEVELOPMENT }.linkTask.configure {
+            // KGP 2.4's incremental linker retains cache-history-dependent sections. A full
+            // development link makes Debug artifacts reproducible; library compilation stays incremental.
+            incrementalWasm = false
+        }
+        val productionExecutable = executableBinaries
+            .single { it.mode == KotlinJsBinaryMode.PRODUCTION }
+        productionExecutable.linkTask.configure {
+            // The optimized production module is shipped without source maps. Avoid
+            // collecting locations and copying an unusable pre-Binaryen .wasm.map.
+            compilerOptions.sourceMap.set(false)
+            compilerOptions.sourceMapEmbedSources.unsetConvention()
+        }
+
+        val staleSourceMapName = "$wasmModuleName.wasm.map"
+        val staleProductionSourceMaps = listOf(
+            productionExecutable.outputDirBase.map {
+                it.dir("kotlin").file(staleSourceMapName)
+            },
+            productionExecutable.outputDirBase.map {
+                it.dir("optimized").file(staleSourceMapName)
+            },
+            productionExecutable.compilation.npmProject.dist.map {
+                it.file(staleSourceMapName)
+            },
+        )
+        val removeStaleProductionSourceMaps = tasks.register<Delete>(
+            "removeWasmJsProductionSourceMaps",
+        ) {
+            dependsOn(productionExecutable.linkTask)
+            delete(staleProductionSourceMaps)
+            onlyIf("stale production Wasm source maps exist") {
+                staleProductionSourceMaps.any { it.get().asFile.exists() }
+            }
+        }
+        (productionExecutable as WasmBinary).optimizeTask.configure {
+            dependsOn(removeStaleProductionSourceMaps)
+        }
+    }
+
+    sourceSets {
+        commonMain.dependencies {
+            implementation(libraries.findLibrary("compose-runtime").get())
+            implementation(libraries.findLibrary("compose-foundation").get())
+            implementation(libraries.findLibrary("compose-ui").get())
+            implementation(libraries.findLibrary("kotlinx-browser").get())
+        }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
+    }
+}
+
+configureSkikoWasmRuntime(libraries.findVersion("skiko").get().requiredVersion)
+
+tasks.named<KotlinWebpack>("wasmJsBrowserProductionWebpack") {
+    sourceMaps = false
+}
+
+packageLegalDocuments()

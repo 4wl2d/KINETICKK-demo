@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.profile.interaction.workshop.matrix
+
+import kinetickk.ball.content.api.MatrixBranch
+import kinetickk.ball.content.api.MatrixNodeId
+import kinetickk.foundation.collections.ImmutableList
+
+/** Whether a node has another rank and the player can afford it. */
+enum class MatrixNodeStatus {
+    MAXED,
+    SHORT_OF_MATTER,
+    AVAILABLE,
+}
+
+data class MatrixNodeRenderModel(
+    val id: MatrixNodeId,
+    val name: String,
+    val description: String,
+    val branch: MatrixBranch,
+    /** Tile position within its branch. */
+    val lane: Int,
+    val rank: Int,
+    val maxRanks: Int,
+    /** Price of the next rank; 0 when maxed. */
+    val nextCost: Long,
+    val status: MatrixNodeStatus,
+) {
+    val isMaxed: Boolean get() = status == MatrixNodeStatus.MAXED
+    val canBuy: Boolean get() = status == MatrixNodeStatus.AVAILABLE
+    val owned: Boolean get() = rank > 0
+}
+
+/** Small immutable payload rendered by the Matrix feature. */
+data class MatrixRenderModel(
+    val matter: Long,
+    val nodes: ImmutableList<MatrixNodeRenderModel>,
+    /** Matter a reset returns: the price of every owned rank. */
+    val refund: Long,
+) {
+    val ownedNodeCount: Int get() = nodes.count { it.owned }
+    val nodeCount: Int get() = nodes.size
+
+    fun node(id: MatrixNodeId): MatrixNodeRenderModel? = nodes.firstOrNull { it.id == id }
+}
+
+/** What the Core Matrix body asks of its host (the Workshop's shared header owns Back). */
+sealed interface MatrixOutput {
+    data object Back : MatrixOutput
+}

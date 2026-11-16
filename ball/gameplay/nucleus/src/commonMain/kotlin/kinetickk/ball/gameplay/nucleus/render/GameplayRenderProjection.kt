@@ -1,0 +1,490 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.nucleus.render
+
+import kinetickk.ball.content.api.BuildTag
+import kinetickk.ball.content.api.CoreShape
+import kinetickk.ball.content.api.DirectorPersonalityId
+import kinetickk.ball.content.api.EquippedRelic
+import kinetickk.ball.content.api.GameplayContentSnapshot
+import kinetickk.ball.content.api.ItemDefinition
+import kinetickk.ball.content.api.OmenId
+import kinetickk.ball.content.api.RelicId
+import kinetickk.ball.content.api.SignalKind
+import kinetickk.ball.content.api.SignalOption
+import kinetickk.ball.content.api.StatusElement
+import kinetickk.ball.content.api.WeaponDefinition
+import kinetickk.ball.content.api.WeaponId
+import kinetickk.ball.content.api.WeaponMastery
+import kinetickk.ball.profile.api.PlayerPreferences
+import kinetickk.foundation.collections.ImmutableList
+import kinetickk.foundation.collections.ImmutableSet
+import kinetickk.foundation.collections.immutableListOf
+import kotlin.math.sqrt
+
+enum class GamePhase { RUNNING, PAUSED, CHOICE, GAME_OVER, VICTORY }
+
+/** Content owns the roster; gameplay keeps this name so render and simulation code read unchanged. */
+typealias EnemyType = kinetickk.ball.content.api.EnemyType
+
+enum class PickupType { DATA, KEY, REPAIR, RELIC }
+/** A hostile [BOLT] flies; a [MINE] stays put, arms and detonates when the Core comes close. */
+enum class ProjectileKind { BOLT, MINE }
+/**
+ * What an offer deals. [ACTIVE_SLOT] asks which active item an incoming active item replaces when every slot holds one:
+ * a card per held active plus a card that keeps the loadout and salvages the incoming item. [OMEN] is the run-start
+ * omen offer (three omens and No omen), [SIGNAL] an event signal's prompt (its options and Ignore) and [BOON] a
+ * dimension reward's Blessing or Pact cards (a Pact offer adds the Refuse card); the Archive's trove deals [ITEM] cards.
+ */
+enum class ChoiceType { ITEM, TOTEM, WEAPON, RELIC, RELIC_BIND, ACTIVE_SLOT, OMEN, SIGNAL, BOON }
+enum class TotemAction { AMPLIFY_CURRENT, CHANGE_WEAPON }
+/** A relic card binds, ranks up, melds, replaces or salvages a relic. */
+enum class RelicChoiceAction { ACQUIRE, MELD, REPLACE, DECLINE }
+enum class WeaponNodeType { GRAVITY_MINE }
+/**
+ * Weapon-owned world objects ([WeaponEntityProjection]): Gyre discs, sentries, lenses and their wells,
+ * rifts, Aegis shards, missiles, toll and pulse rings, tethers and solar beams.
+ */
+enum class WeaponEntityKind { DISC, WELL }
+/** Content owns the obstacle kinds; gameplay keeps this name so render and simulation code read unchanged. */
+typealias ObstacleKind = kinetickk.ball.content.api.ObstacleKind
+/** Structure capsule walls: a [SOLID] wall, a [DOOR_SEALED] door that blocks like a wall, a [DOOR_OPEN] door that lets the Core through. */
+enum class WallKind { SOLID, DOOR_SEALED, DOOR_OPEN }
+
+data class ChoiceOption(
+    val type: ChoiceType,
+    val title: String,
+    val description: String,
+    val tag: String,
+    /** An item card's item; an [ChoiceType.ACTIVE_SLOT] card's held active item (null on the keep card). */
+    val itemId: Int? = null,
+    val weaponId: WeaponId? = null,
+    val totemAction: TotemAction? = null,
+    val relicId: RelicId? = null,
+    val relicAction: RelicChoiceAction? = null,
+    val relicSlot: Int? = null,
+    val rewardFocus: kinetickk.ball.content.api.RewardFocus? = null,
+    /** Surged cards are stronger and count double for resonance; rolled when the offer was built. */
+    val surged: Boolean = false,
+    /**
+     * An active item card: the item's active effect; an [ChoiceType.ACTIVE_SLOT] card: the effect of the held active it
+     * would replace. A projection of content ([itemId]'s [kinetickk.ball.content.api.ItemDefinition.active]).
+     */
+    val skillId: kinetickk.ball.content.api.SkillId? = null,
+    /** An active item card: the rank its effect has once taken (stacks + 1); an [ChoiceType.ACTIVE_SLOT] card: the held rank. */
+    val skillRank: Int? = null,
+    /**
+     * The skill slot (0 Z, 1 X, 2 C): the slot an active item card binds to or ranks (null while it would replace a
+     * slot) or the slot an [ChoiceType.ACTIVE_SLOT] card replaces (null on the keep card).
+     */
+    val activeSlot: Int? = null,
+    /** An unowned active item card offered while every slot holds another active: taking it asks which one to replace. */
+    val replacesActive: Boolean = false,
+    /** Every [ChoiceType.ACTIVE_SLOT] card (the keep card too): the incoming active item waiting for a slot. */
+    val incomingItemId: Int? = null,
+    /**
+     * The [ChoiceType.ACTIVE_SLOT] keep card: the Matter the incoming item is salvaged for, as the salvage grants it
+     * before the run's Matter gain. The Pact offer's Refuse card ([ChoiceType.BOON] without a boon): the Matter refusing
+     * grants, after the run's Matter gain (rounded). Presentation shows this number; it never recomputes the salvage.
+     */
+    val salvageMatter: Int? = null,
+    /** An [ChoiceType.OMEN] card's omen (null on the No omen card). */
+    val omenId: OmenId? = null,
+    /** A [ChoiceType.SIGNAL] card's signal and option ([SignalOption.IGNORE] declines the prompt). */
+    val signalKind: SignalKind? = null,
+    val signalOption: SignalOption? = null,
+    /** What a [ChoiceType.SIGNAL] option costs and pays (Matter, integrity or rerolls, by option). */
+    val signalCost: Int = 0,
+    val signalPayout: Int = 0,
+    /** A card shown but not takeable (a [ChoiceType.SIGNAL] option the run cannot afford). */
+    val locked: Boolean = false,
+    /** A [ChoiceType.BOON] card's Blessing or Pact id. */
+    val boonId: Int? = null,
+    /** A signal's item rarity floor, or null when the signal offers no items. */
+    val signalRarity: kinetickk.ball.content.api.ItemRarity? = null,
+)
+
+/** What the renderer and HUD read from the active Core's mechanic. */
+data class CharacterAbilityProjection(
+    /** Mechanic readiness 0..1 (Orbit charge, intact facets or Puncture readiness). */
+    val charge: Float = 0f,
+    val facets: Int = 0,
+    val facetProgress: Float = 0f,
+)
+
+data class EnemyProjection(
+    val id: Int,
+    val type: EnemyType,
+    val x: Float,
+    val y: Float,
+    val vx: Float,
+    val vy: Float,
+    val hp: Float,
+    val maxHp: Float,
+    val radius: Float,
+    val actionTimer: Float,
+    val flash: Float,
+    val contactCooldown: Float,
+    val weaponCooldown: Float,
+    val previousX: Float,
+    val previousY: Float,
+    val dead: Boolean,
+    /** Seven 4-bit stack counts in StatusElement order (bits 0..27), then frozen, brittle, embrittled and primed flags. */
+    val statusBits: Int = 0,
+    /** Aspect, weakness, frame and Architect shift state; decode with [EnemyAffinity]. */
+    val affinityBits: Int = 0,
+    /** Type-specific behavior step; see [EnemyBehavior]. */
+    val behavior: Int = 0,
+    /** Seconds left in [behavior] (telegraphs fill as it runs out). */
+    val behaviorRemaining: Float = 0f,
+    /** Aim or shield direction in radians. */
+    val facing: Float = 0f,
+    /** Id of the Aegis tethering this enemy, or -1. */
+    val linkedTo: Int = -1,
+    /** True while a Herald's shield holds. */
+    val shielded: Boolean = false,
+    /** Control and mark state; decode with [EnemyControlBits]. */
+    val controlBits: Int = 0,
+    /** Type-specific stored charges (shield arcs, brood pips); 0 for kinds without any. */
+    val charges: Int = 0,
+)
+
+/** Behavior steps published in [EnemyProjection.behavior]; meaning depends on the enemy type. */
+object EnemyBehavior {
+    const val IDLE: Int = 0
+    /** Charger strike and Lancer lance. */
+    const val STRIKE: Int = 1
+    /** Lancer line and Sniper sight line before the attack. */
+    const val TELEGRAPH: Int = 2
+    /** Lancer recovery after a lance. */
+    const val RECOVERY: Int = 3
+    /** Enemy out of phase and untargetable. */
+    const val PHASED: Int = 4
+    /** Bomber about to explode. */
+    const val PRIMED: Int = 5
+    /** A mounted turret anchored to its rock or wall. */
+    const val ANCHORED: Int = 6
+}
+
+data class ProjectileProjection(
+    val x: Float,
+    val y: Float,
+    val vx: Float,
+    val vy: Float,
+    val radius: Float,
+    val life: Float,
+    val hostile: Boolean,
+    val damage: Float,
+    val pierce: Int,
+    val colorIndex: Int,
+    val sourceWeapon: WeaponId?,
+    val previousX: Float,
+    val previousY: Float,
+    val kind: ProjectileKind = ProjectileKind.BOLT,
+)
+
+data class PickupProjection(
+    val type: PickupType,
+    val x: Float,
+    val y: Float,
+    val vx: Float,
+    val vy: Float,
+    val life: Float,
+    val previousX: Float,
+    val previousY: Float,
+)
+
+/**
+ * A Volatile Remains burst armed at [armedAt] where an ordinary enemy died; it detonates
+ * at [detonatesAt] (run seconds) inside the [radius] telegraph ring. Static, so rebases move it.
+ */
+data class VolatileBurstProjection(
+    val x: Float,
+    val y: Float,
+    val radius: Float,
+    val armedAt: Float,
+    val detonatesAt: Float,
+)
+
+/**
+ * A static world obstacle; [id] is stable across rebases, [shapeSeed] picks its outline. [fuseAt] is when an armed
+ * mine detonates (0 while unarmed); [repels] marks a gravity knot that pushes instead of pulling.
+ */
+data class ObstacleProjection(
+    val id: Long,
+    val kind: ObstacleKind,
+    val x: Float,
+    val y: Float,
+    val radius: Float,
+    val shapeSeed: Int,
+    val fuseAt: Float = 0f,
+    val repels: Boolean = false,
+)
+
+/** A trail sample [age] seconds old that burns for [life] seconds (render fades it out after) at [scale] strength. */
+data class TrailPointProjection(val x: Float, val y: Float, val age: Float, val life: Float = 1.8f, val scale: Float = 1f)
+/**
+ * A waiting Totem chest (published in realspace only): its structure [id], run-local position, charges left, and the
+ * run times it materialised and from which it opens. Openable (a Key held) and armed (`elapsed >= armedAt`) are
+ * derived by the renderer, so the projection changes only on a materialise, an open or a rebase.
+ */
+data class TotemChestProjection(
+    val id: Long,
+    val x: Float,
+    val y: Float,
+    val charges: Int,
+    val bornAt: Float,
+    val armedAt: Float,
+)
+
+data class WeaponNodeProjection(
+    val type: WeaponNodeType,
+    val x: Float,
+    val y: Float,
+    val life: Float,
+    val maxLife: Float,
+    val radius: Float,
+)
+
+/** A disc or mine well at its current and previous fixed-step positions. */
+data class WeaponEntityProjection(
+    val kind: WeaponEntityKind,
+    val x: Float,
+    val y: Float,
+    val previousX: Float,
+    val previousY: Float,
+    val angle: Float,
+    val previousAngle: Float,
+    val radius: Float,
+    val life: Float,
+    val maxLife: Float,
+    val phase: Int,
+)
+
+/**
+ * Immutable, API-owned projection of a committed GameplayRun frame.
+ *
+ * [lastImpact] and [lastImpactTime] are used by projection tests and benchmark witnesses.
+ * The Debug crash context (`GameplayCrashContext.kt`) records [pointerActive], [runGrace], [mass], [coolingRate],
+ * [magnetStrength], [dashImpulse], [regenPerSecond], [critMultiplier], [luck], [dataGain], [matterGain],
+ * [attackSpeed], [damageReduction], [overdriveGain], [dragCoefficient] and [recentItem] unrounded.
+ * The player sees stats through the typed build rows.
+ */
+class GameplayRenderModel(
+    val content: GameplayContentSnapshot,
+    val phase: GamePhase,
+    val settings: PlayerPreferences,
+    val screenWidth: Float,
+    val screenHeight: Float,
+    val uiScale: Float,
+    val coreX: Float,
+    val coreY: Float,
+    val velocityX: Float,
+    val velocityY: Float,
+    val cameraX: Float,
+    val cameraY: Float,
+    val pointerX: Float,
+    val pointerY: Float,
+    val pointerActive: Boolean,
+    val braking: Boolean,
+    val elapsed: Float,
+    val heat: Float,
+    val overheated: Boolean,
+    val dashPhaseTime: Float,
+    val hp: Float,
+    val maxHp: Float,
+    val shield: Float,
+    val maxShield: Float,
+    val level: Int,
+    val data: Int,
+    val nextLevelData: Int,
+    val keys: Int,
+    val kills: Int,
+    val runStatistics: RunStatistics = RunStatistics(),
+    val combo: Int,
+    val comboTime: Float,
+    val runMatter: Long,
+    val totalMatter: Long,
+    val lastImpact: Float,
+    val lastImpactTime: Float,
+    val damageFlash: Float,
+    val runGrace: Float,
+    val screenShake: Float,
+    val message: String,
+    val messageTime: Float,
+    val mass: Float,
+    val damageMultiplier: Float,
+    val weaponPower: Float,
+    val coolingRate: Float,
+    val magnetStrength: Float,
+    val dashImpulse: Float,
+    val dashHeatCost: Float,
+    val regenPerSecond: Float,
+    val critChance: Float,
+    val critMultiplier: Float,
+    val pickupRadius: Float,
+    val luck: Float,
+    val dataGain: Float,
+    val matterGain: Float,
+    val attackSpeed: Float,
+    val damageReduction: Float,
+    val comboWindow: Float,
+    val overdriveGain: Float,
+    val dragCoefficient: Float,
+    val polarityStability: Float,
+    val weapon: WeaponId,
+    val weaponLevel: Int,
+    val overdriveCharge: Float,
+    val overdriveTime: Float,
+    val rerollsRemaining: Int,
+    val acquiredItemCount: Int,
+    val recentItem: ItemDefinition?,
+    val equippedRelics: ImmutableList<EquippedRelic>,
+    val morningstarAngle: Float,
+    val morningstarX: Float,
+    val morningstarY: Float,
+    val totemChests: ImmutableList<TotemChestProjection>,
+    val coreShape: CoreShape,
+    val enemies: ImmutableList<EnemyProjection>,
+    val projectiles: ImmutableList<ProjectileProjection>,
+    val pickups: ImmutableList<PickupProjection>,
+    val trail: ImmutableList<TrailPointProjection>,
+    val weaponNodes: ImmutableList<WeaponNodeProjection>,
+    val choices: ImmutableList<ChoiceOption>,
+    val choiceType: ChoiceType,
+    val pendingRelicChoiceCount: Int,
+    internal val itemStacks: ImmutableList<Int>,
+    internal val discoveredItemIds: ImmutableSet<Int>,
+    internal val relicRanks: ImmutableList<Int>,
+    /** Window sites (offered or active), then the secret sigil if any. */
+    val sites: ImmutableList<SiteProjection> = immutableListOf(),
+    val directedChoice: Boolean = false,
+    val characterAbility: CharacterAbilityProjection = CharacterAbilityProjection(),
+    val effectiveWeaponPower: Float = weaponPower,
+    val rewardPreviews: ImmutableList<RewardPreview> = kinetickk.foundation.collections.immutableListOf(),
+    internal val discoveredRelicMask: Long = 0L,
+    val build: BuildProjection = BuildProjection(),
+    internal val discoveredReactionMask: Int = 0,
+    internal val discoveredPairingMask: Int = 0,
+    /** Current Core radius; renderers draw the Core with it. [CORE_RADIUS] is only the default. */
+    val coreRadius: Float = CORE_RADIUS,
+    /** Power of character abilities and weapon-based item effects; reward cards price weapon units with it. */
+    val abilityPower: Float = effectiveWeaponPower,
+    /**
+     * Core position at the start of the last fixed step. Renderers draw moving things between it and the current
+     * position by the frame's [GameplayRenderSnapshot.interpolationAlpha].
+     */
+    val previousCoreX: Float = coreX,
+    val previousCoreY: Float = coreY,
+    /** Camera position at the start of the last fixed step. */
+    val previousCameraX: Float = cameraX,
+    val previousCameraY: Float = cameraY,
+    /** Morningstar position at the start of the last fixed step. */
+    val previousMorningstarX: Float = morningstarX,
+    val previousMorningstarY: Float = morningstarY,
+    /**
+     * Device pixels per dp of the viewport the simulation accepted. Simulation coordinates (world,
+     * viewport and pointer) are dp; the world layer is drawn scaled by this density.
+     */
+    val viewportDensity: Float = 1f,
+    /** World obstacles of the generated window around the Core (static; rebases move them). */
+    val obstacles: ImmutableList<ObstacleProjection> = kinetickk.foundation.collections.immutableListOf(),
+    /** World distance from the Core to the minimap's edge (dp). */
+    val minimapRange: Float = DEFAULT_MINIMAP_RANGE,
+    /** Weapon-owned world objects with their previous fixed-step positions. */
+    val weaponEntities: ImmutableList<WeaponEntityProjection> = kinetickk.foundation.collections.immutableListOf(),
+    /** The equipped weapon's live synergies; the pause build screen reads them. */
+    val weaponSynergy: WeaponSynergyProjection = WeaponSynergyProjection(),
+    /** Volatile Remains bursts waiting to detonate. */
+    val volatileBursts: ImmutableList<VolatileBurstProjection> = kinetickk.foundation.collections.immutableListOf(),
+    /** The run's level cap; at it [level] equals it and Data charges the Apex instead. */
+    val maxLevel: Int = content.tempo.maximumLevel,
+    /** The Z, X and C skill slots. */
+    val skillBar: SkillBarProjection = SkillBarProjection.EMPTY,
+    /** The character's Apex. */
+    val apex: ApexProjection = ApexProjection.LOCKED,
+    /** Lingering combat fields in creation order. */
+    val combatFields: ImmutableList<CombatFieldProjection> = kinetickk.foundation.collections.immutableListOf(),
+    /** Lingering reaction and skill states on the Core. */
+    val coreState: CoreStateProjection = CoreStateProjection.NEUTRAL,
+    /** How long the heading has held near-straight, 0..1 (straight-line fatigue). */
+    val coreStraightness: Float = 0f,
+    /** The run was started in Easy mode (fixed for the whole run). */
+    val easyMode: Boolean = false,
+    /** Core Freeze 0..1 (0: off, measure-only or thawed; 1: frozen solid); [coreStasisMotion] says where it heads. */
+    val coreStasis: Float = 0f,
+    val coreStasisMotion: CoreStasisMotion = CoreStasisMotion.CLEAR,
+    /** Hash-placed caches and signals around the Core (never offered by a window). */
+    val ambientSites: ImmutableList<SiteProjection> = immutableListOf(),
+    /** The one HUD trial panel's facts: the active site, dungeon or dimension objective, or null. */
+    val trial: TrialProjection? = null,
+    /** Run secret flags (bit = flag ordinal) that presentation reads. */
+    val secretFlags: Int = 0,
+    /** The Golden Drifter's enemy id while it flies, or -1. */
+    val goldenDrifterId: Int = -1,
+    /** Structures, their walls and signals around the Core, and the dungeon in progress. */
+    val structures: StructureRenderProjection = StructureRenderProjection.EMPTY,
+    /** The world layer the Core is in and its visit. */
+    val dimension: DimensionProjection = DimensionProjection.REALSPACE,
+    /** Blessings and Pacts taken this run, in order. */
+    val runBoons: ImmutableList<Int> = immutableListOf(),
+    /** The omen chosen at the run start, or null. */
+    val runOmen: OmenId? = null,
+    /** The director personality rolled for this run, or null. */
+    val directorPersonality: DirectorPersonalityId? = null,
+    /** The run's featured build tag and element (run resonance), or null. */
+    val keynoteTag: BuildTag? = null,
+    val keynoteElement: StatusElement? = null,
+    /** The ambient world event in progress (telegraph included), or null. */
+    val worldEvent: WorldEventProjection? = null,
+    /** Live event signals in the world. */
+    val eventSignals: ImmutableList<EventSignalProjection> = immutableListOf(),
+) {
+    val speed: Float get() = vectorLength(velocityX, velocityY)
+    val runProgress: Float get() = content.tempo.progress(elapsed)
+    val tetherDistance: Float
+        get() {
+            val targetX = cameraX + pointerX - screenWidth * 0.5f
+            val targetY = cameraY + pointerY - screenHeight * 0.5f
+            return vectorLength(targetX - coreX, targetY - coreY)
+        }
+    val dashReady: Boolean get() = !overheated && heat <= MAX_HEAT - dashHeatCost * 0.5f
+    val tetherAuthority: Float get() = polarityStability * polarityStability
+    val velocityTier: Int
+        get() = when {
+            speed >= 2_200f -> 4
+            speed >= 1_400f -> 3
+            speed >= 900f -> 2
+            speed >= 500f -> 1
+            else -> 0
+        }
+    val discoveredItemCount: Int get() = discoveredItemIds.size
+    fun isItemDiscovered(id: Int): Boolean = id in discoveredItemIds
+    fun isRelicDiscovered(id: kinetickk.ball.content.api.RelicId): Boolean = discoveredRelicMask and (1L shl id.ordinal) != 0L
+    fun isReactionDiscovered(id: kinetickk.ball.content.api.ReactionId): Boolean = discoveredReactionMask and (1 shl id.ordinal) != 0
+    fun isPairingDiscovered(id: kinetickk.ball.content.api.RelicPairingId): Boolean = discoveredPairingMask and (1 shl id.ordinal) != 0
+    val currentWeaponDefinition: WeaponDefinition get() = content.weapon(weapon)
+    val currentWeaponMastery: WeaponMastery get() = content.weaponMasteryForLevel(weaponLevel)
+    val nextWeaponMastery: WeaponMastery? get() = content.weaponMasteryAfter(weaponLevel)
+    val choicesCanReroll: Boolean
+        get() = phase == GamePhase.CHOICE && !directedChoice && rerollsRemaining > 0 && when (choiceType) {
+            ChoiceType.ITEM, ChoiceType.WEAPON, ChoiceType.RELIC -> true
+            ChoiceType.TOTEM, ChoiceType.RELIC_BIND, ChoiceType.ACTIVE_SLOT -> false
+            // Omens and dimension boons are never rerolled; a signal prompt deals fixed options.
+            ChoiceType.OMEN, ChoiceType.SIGNAL, ChoiceType.BOON -> false
+        }
+    val itemStacksSnapshot: ImmutableList<Int> get() = itemStacks
+
+    fun relicRank(id: RelicId): Int = relicRanks.getOrElse(id.ordinal) { 0 }
+    fun itemStack(itemId: Int): Int = itemStacks.getOrElse(itemId) { 0 }
+
+    companion object {
+        const val MAX_HEAT = 100f
+        const val CORE_RADIUS = 16f
+        const val FIXED_STEP = 1f / 120f
+        const val DEFAULT_MINIMAP_RANGE = 2_200f
+    }
+}
+
+private fun vectorLength(x: Float, y: Float): Float = sqrt(x * x + y * y)

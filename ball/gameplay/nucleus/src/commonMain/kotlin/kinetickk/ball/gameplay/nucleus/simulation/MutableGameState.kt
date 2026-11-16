@@ -1,0 +1,512 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.nucleus.simulation
+
+import kinetickk.ball.content.api.ContentBounds
+import kinetickk.ball.content.api.EquippedRelic
+import kinetickk.ball.content.api.GameplayContentSnapshot
+import kinetickk.ball.content.api.RelicId
+import kinetickk.ball.content.api.WorldLayer
+import kinetickk.ball.content.api.WeaponDefinition
+import kinetickk.ball.content.api.WeaponId
+import kinetickk.ball.content.api.WeaponMastery
+
+import kinetickk.foundation.random.CloneableXorWowRandom
+import kinetickk.ball.profile.api.GameplayProfileSnapshot
+import kinetickk.ball.profile.api.PlayerPreferences
+import kinetickk.ball.gameplay.api.*
+import kinetickk.ball.gameplay.nucleus.render.*
+import kinetickk.ball.gameplay.nucleus.model.*
+import kinetickk.ball.gameplay.nucleus.protocol.BoundedVisualFxCueAccumulator
+import kinetickk.ball.gameplay.nucleus.protocol.GameplayAudioCue
+import kinetickk.ball.gameplay.nucleus.protocol.VisualFxCue
+import kinetickk.foundation.collections.ImmutableList
+import kinetickk.foundation.collections.ImmutableSet
+import kinetickk.foundation.collections.immutableListOf
+import kinetickk.foundation.collections.immutableSetOf
+import kinetickk.foundation.collections.toImmutableList
+import kotlin.math.max
+import kotlin.jvm.JvmInline
+import kinetickk.ball.gameplay.nucleus.simulation.dimensions.*
+import kinetickk.ball.gameplay.nucleus.simulation.progression.*
+import kinetickk.ball.gameplay.nucleus.simulation.structures.*
+import kinetickk.ball.gameplay.nucleus.simulation.world.*
+import kinetickk.ball.gameplay.nucleus.simulation.skills.SkillCastState
+import kinetickk.ball.gameplay.nucleus.simulation.elements.CoreReactionState
+import kinetickk.ball.gameplay.nucleus.simulation.director.SpawnDirectorState
+import kinetickk.ball.gameplay.nucleus.simulation.flight.CoreStasisState
+import kinetickk.ball.gameplay.nucleus.simulation.builds.*
+import kinetickk.ball.gameplay.nucleus.simulation.sites.SiteRunState
+import kinetickk.ball.gameplay.nucleus.simulation.variety.HostileTuning
+import kinetickk.ball.gameplay.nucleus.simulation.variety.VarietyRunState
+import kinetickk.ball.gameplay.nucleus.simulation.elements.ElementRunState
+import kinetickk.ball.gameplay.nucleus.simulation.weapons.WeaponRunState
+import kinetickk.ball.gameplay.nucleus.simulation.characters.CharacterRunState
+
+/**
+ * Reducer-owned simulation state. Each field declares its initial value and its copy from [copySource] together,
+ * so extending owned State requires no second field-copy list in the render mapper.
+ *
+ * The production tick mutates one instance in place. [deepCopy] isolates every mutable storage, random stream and
+ * pending output buffer of its source; immutable values are shared.
+ *
+ * Cohesive groups with a single writing domain live in state holders, declared first so every later initializer sees
+ * them; each holder copies itself from its [copySource] counterpart and resets its own group when a run starts. The
+ * root keeps the random streams, the Core's motion, vitals and timers, the weapon, the compiled build and skills, the
+ * live entity lists and the open choices. New fields go into a holder, read as `state.<holder>.<field>`; the
+ * forwarders in the `*Forwarders.kt` files of this package only keep older call sites unchanged.
+ */
+internal class MutableGameState(
+    internal val content: GameplayContentSnapshot,
+    seed: Int = 731_991,
+    initialMatter: Int? = null,
+    bootstrapProgress: GameplayProfileSnapshot? = null,
+    copySource: MutableGameState? = null,
+    runMode: RunMode = RunMode.STANDARD,
+    offerRunOmen: Boolean = false,
+) {
+    companion object {
+        const val CURSOR_KILL_RADIUS = 22f
+        const val CORE_RADIUS = 16f
+        const val MAX_HEAT = 100f
+        const val FIXED_STEP = 1f / 120f
+        const val DASH_INPUT_BUFFER_SECONDS = 0.16f
+        const val MAX_PROJECTILES = 650
+        const val MAX_PICKUPS = 420
+        const val MAX_TRAIL_POINTS = 110
+        const val MAX_ECHO_HITS = 256
+        const val MAX_BUFFS = 16
+        const val MAX_CHAIN_SCRATCH = 21
+        const val REACTION_BURST = 12f
+        const val BREAK_BURST = 16f
+        const val REWARD_SEED_SALT = 0x5EED_A11
+        /** The draft deck's own stream (seed xor salt): dealing never draws from [rewardRandom]. */
+        const val DECK_SEED_SALT = 0x0DEC_C0DE
+        const val SPAWN_SEED_SALT = 0x5A_A4_D1_E7
+        /** The site stream's salt (seed xor salt): window kinds never shift offers, spawns or crits. */
+        const val SITE_SEED_SALT = 0x517E_5EED
+        const val MAX_SEVERED_RELICS = 4
+        const val MAX_GAMEPLAY_SOUND_CUES = 32
+        const val MAX_WEAPON_NODES = 12
+        const val MAX_CHOICES = 4
+        /** Volatile Remains bursts waiting at once; more deaths in the window add none. */
+        const val MAX_VOLATILE_BURSTS = 48
+        const val MAX_TRAIL_SAMPLES_PER_UPDATE = 32
+        const val MAX_GUARD_SHARDS = 6
+        const val SKILL_INPUT_BUFFER_SECONDS = 0.16f
+        /** Enemies one skill cast may pick at once (Catalyze's largest target cap). */
+        const val MAX_SKILL_SCRATCH = 10
+    }
+
+    /** Per-step combat and elements scratch. */
+    internal val scratch: StepScratch = StepScratch(copySource?.scratch)
+    /** Choices waiting to open. */
+    internal val pendingChoice: PendingChoiceState = PendingChoiceState(copySource?.pendingChoice)
+    /** Skill and Apex input buffers and the running cast's scratch. */
+    internal val skillCast: SkillCastState = SkillCastState(copySource?.skillCast)
+    /** Lingering reaction effects on the Core. */
+    internal val coreReactions: CoreReactionState = CoreReactionState(copySource?.coreReactions)
+    /** Retained relic mechanic timers, charges and counters. */
+    internal val relicMechanics: RelicMechanicState = RelicMechanicState(copySource?.relicMechanics)
+    /** Spawn pacing, director plan and live encounters. */
+    internal val spawnDirector: SpawnDirectorState = SpawnDirectorState(content, copySource?.spawnDirector)
+    /** Structure window, dungeon and spent structures. */
+    internal val structures: StructureRunState = StructureRunState(copySource?.structures)
+    /** Core Stasis: the leash anchor, speed average and stillness clocks. */
+    internal val coreStasis: CoreStasisState = CoreStasisState(copySource?.coreStasis)
+    /** Profile capture, run options and the draft deck. */
+    internal val profileCapture: RunProfileCapture = RunProfileCapture(
+        content,
+        copySource?.profileCapture,
+        seed,
+        bootstrapProgress,
+        runMode,
+        offerRunOmen,
+    )
+    /** Known and pending discoveries. */
+    internal val discoveryState: DiscoveryState = DiscoveryState(content, copySource?.discoveryState, bootstrapProgress)
+    /** Profile progress awaiting publication. */
+    internal val progressOutbox: ProgressOutbox = ProgressOutbox(copySource?.progressOutbox)
+    /** Relic ranks, cooldowns and counters. */
+    internal val relicRun: RelicRunState = RelicRunState(content, copySource?.relicRun)
+    /** Choice type, rerolls, offer pity and the last acquisition. */
+    internal val offerRun: OfferRunState = OfferRunState(copySource?.offerRun)
+    /** Run statistics. */
+    internal val runStats: RunStatsState = RunStatsState(copySource?.runStats)
+    /** Level, Data, Keys and Matter. */
+    internal val runEconomy: RunEconomyState = RunEconomyState(
+        content,
+        copySource?.runEconomy,
+        initialMatter,
+        bootstrapProgress,
+    )
+    /** Build stats. */
+    internal val coreStats: CoreStatsState = CoreStatsState(content, copySource?.coreStats)
+    /** Sites, directed rewards and run secrets. */
+    internal val siteRun: SiteRunState = SiteRunState(copySource?.siteRun)
+    /** Omen, mutators, personality, world events and signals. */
+    internal val varietyRun: VarietyRunState = VarietyRunState(copySource?.varietyRun)
+    /** World origin, obstacle window, keep-out and contact gates. */
+    internal val worldRun: WorldRunState = WorldRunState(copySource?.worldRun)
+    /** Rifts, the visit, its clocks and its reward. */
+    internal val dimensionVisits: DimensionVisitState = DimensionVisitState(copySource?.dimensionVisits)
+    /** Owned items, clause timers and counters, buffs. */
+    internal val buildRun: BuildRunState = BuildRunState(content, copySource?.buildRun)
+    /** Combat fields and the reaction and break budgets. */
+    internal val elementRun: ElementRunState = ElementRunState(copySource?.elementRun)
+    /** Weapon level, runtime, clocks and weapon entities. */
+    internal val weaponRun: WeaponRunState = WeaponRunState(copySource?.weaponRun)
+    /** Character shape, runtime and Refit. */
+    internal val characterRun: CharacterRunState = CharacterRunState(copySource?.characterRun, bootstrapProgress)
+    /** Frame admission, viewport and display feedback. */
+    internal val frameState: FrameState = FrameState(copySource?.frameState)
+    /** Sound and visual cues awaiting the owner. */
+    internal val cueOutbox: CueOutbox = CueOutbox(copySource?.cueOutbox)
+
+    internal var gameplayRandom: CloneableXorWowRandom = copySource?.gameplayRandom?.copy()
+        ?: CloneableXorWowRandom(seed)
+    /** Offers draw from their own stream, so drafting choices never shift spawns or crits. */
+    internal var rewardRandom: CloneableXorWowRandom = copySource?.rewardRandom?.copy()
+        ?: CloneableXorWowRandom(seed xor REWARD_SEED_SALT)
+    /**
+     * Every spawn, spawn position, enemy type, Elite aspect and director draw comes from this
+     * stream, so spawning never shifts crits and procs, and a different run seed reshapes the waves.
+     */
+    internal var spawnRandom: CloneableXorWowRandom = copySource?.spawnRandom?.copy()
+        ?: CloneableXorWowRandom(seed xor SPAWN_SEED_SALT)
+    /** Folded Matrix effects of [matrixRanks]; immutable, refolded when a run starts. */
+    internal var matrix: MatrixModifiers = copySource?.matrix ?: foldMatrix()
+    internal val pendingDiscoveredItemIds: PendingDiscoveredItemIdBuffer
+        get() = PendingDiscoveredItemIdBuffer(this)
+    /** Baby mode (RunMode.EASY), fixed when the run is created; a run never changes it. */
+    internal val easyMode: Boolean = copySource?.easyMode ?: (runMode == RunMode.EASY)
+    /** Immutable compiled build shared by reduction siblings; replaced by [recompileBuild]. */
+    internal var build: CompiledBuild = copySource?.build ?: CompiledBuild.empty(content)
+    /** What the skill slots hold: the owned active items' effects; immutable, replaced when an active item binds, ranks or is replaced. */
+    internal var skillLoadout: SkillLoadout = copySource?.skillLoadout ?: SkillLoadout.EMPTY
+    /** Skill and Apex timing; a deep copy forks it. */
+    internal var skillRuntime: SkillRuntime = copySource?.skillRuntime?.fork() ?: SkillRuntime()
+    internal var invulnerableUntil: Float = copySource?.invulnerableUntil ?: 0f
+    internal var overdriveBurnoutUntil: Float = copySource?.overdriveBurnoutUntil ?: 0f
+    internal var overheatArmed: Boolean = copySource?.overheatArmed ?: true
+    internal var wasBraking: Boolean = copySource?.wasBraking ?: false
+    internal var brakeHoldTime: Float = copySource?.brakeHoldTime ?: 0f
+    internal var brakeShedSpeed: Float = copySource?.brakeShedSpeed ?: 0f
+    internal var critMissStreak: Int = copySource?.critMissStreak ?: 0
+    internal var freeDashPrimed: Boolean = copySource?.freeDashPrimed ?: false
+    internal var freeDashReadyAt: Float = copySource?.freeDashReadyAt ?: 0f
+    internal var dashHitThisDash: Boolean = copySource?.dashHitThisDash ?: false
+    internal val soundCues: PendingSoundCueBuffer
+        get() = PendingSoundCueBuffer(this)
+    internal val visualFxCues: PendingVisualFxCueBuffer
+        get() = PendingVisualFxCueBuffer(this)
+    /** Window kinds draw from their own stream, so sites never shift offers, spawns or crits. */
+    internal var siteRandom: CloneableXorWowRandom = copySource?.siteRandom?.copy()
+        ?: CloneableXorWowRandom(seed xor SITE_SEED_SALT)
+
+    internal var nextEntityId: Int = copySource?.nextEntityId ?: 1
+    /** Seed of this run; obstacle chunks hash it with their absolute chunk. */
+    internal val runSeed: Int = copySource?.runSeed ?: seed
+    /** Content and seed are fixed for this state and all reduction siblings; rank the template pool only once. */
+    internal val structureTemplatePool: Int = copySource?.structureTemplatePool
+        ?: structureTemplateMask(content.structures, runSeed)
+    /** The run's world layer; only a layer switch writes it. */
+    internal var worldLayer: WorldLayer = copySource?.worldLayer ?: WorldLayer.BASE
+    /** Run boons owned, in grant order, at most [ContentBounds.MAX_RUN_BOONS]. */
+    internal var runBoons: ImmutableList<Int> = copySource?.runBoons ?: immutableListOf()
+    internal var dashBufferTime: Float = copySource?.dashBufferTime ?: 0f
+    internal var bossSpawned: Boolean = copySource?.bossSpawned ?: false
+    internal var keyboardBrakeActive: Boolean = copySource?.keyboardBrakeActive ?: false
+    internal var secondaryBrakeActive: Boolean = copySource?.secondaryBrakeActive ?: false
+    internal var touchBrakeActive: Boolean = copySource?.touchBrakeActive ?: false
+    internal var previousCoreX: Float = copySource?.previousCoreX ?: 0f
+    internal var previousCoreY: Float = copySource?.previousCoreY ?: 0f
+    internal var previousSingularityX: Float = copySource?.previousSingularityX ?: 0f
+    internal var previousSingularityY: Float = copySource?.previousSingularityY ?: 0f
+    internal var shieldRechargeDelay: Float = copySource?.shieldRechargeDelay ?: 0f
+    internal var overheatHoldTime: Float = copySource?.overheatHoldTime ?: 0f
+    internal var saturationHeadingX: Float = copySource?.saturationHeadingX ?: 1f
+    internal var saturationHeadingY: Float = copySource?.saturationHeadingY ?: 0f
+    internal var smoothedVelocityX: Float = copySource?.smoothedVelocityX ?: 0f
+    internal var smoothedVelocityY: Float = copySource?.smoothedVelocityY ?: 0f
+    internal var turnHeadingEstablished: Boolean = copySource?.turnHeadingEstablished ?: false
+    internal var turnHoldTime: Float = copySource?.turnHoldTime ?: 0f
+    internal var turnRecoveryCooldown: Float = copySource?.turnRecoveryCooldown ?: 0f
+    internal var turnDirection: Int = copySource?.turnDirection ?: 0
+    /** How straight the Core's heading has stayed (0..1); straight-line fatigue reads it. */
+    internal var coreStraightness: Float = copySource?.coreStraightness ?: 0f
+    internal var timeSinceDamage: Float = copySource?.timeSinceDamage ?: 0f
+    internal var hurtCooldown: Float = copySource?.hurtCooldown ?: 0f
+    internal var lastAimDirectionX: Float = copySource?.lastAimDirectionX ?: 1f
+    internal var lastAimDirectionY: Float = copySource?.lastAimDirectionY ?: 0f
+
+    var phase: GamePhase = copySource?.phase ?: GamePhase.RUNNING
+        internal set
+    var settings: PlayerPreferences = copySource?.settings ?: bootstrapProgress?.preferences ?: PlayerPreferences()
+        internal set
+    var screenWidth: Float = copySource?.screenWidth ?: 1280f
+        internal set
+    var screenHeight: Float = copySource?.screenHeight ?: 720f
+        internal set
+
+    var coreX: Float = copySource?.coreX ?: 0f
+        internal set
+    var coreY: Float = copySource?.coreY ?: 0f
+        internal set
+    /** Collision and draw radius of the Core; every simulation contact reads this, never [CORE_RADIUS]. */
+    internal var coreRadius: Float = copySource?.coreRadius ?: CORE_RADIUS
+    var velocityX: Float = copySource?.velocityX ?: 0f
+        internal set
+    var velocityY: Float = copySource?.velocityY ?: 0f
+        internal set
+    var cameraX: Float = copySource?.cameraX ?: 0f
+        internal set
+    var cameraY: Float = copySource?.cameraY ?: 0f
+        internal set
+    var pointerX: Float = copySource?.pointerX ?: 900f
+        internal set
+    var pointerY: Float = copySource?.pointerY ?: 360f
+        internal set
+    var pointerActive: Boolean = copySource?.pointerActive ?: true
+        internal set
+    var braking: Boolean = copySource?.braking ?: false
+        internal set
+
+    var elapsed: Float = copySource?.elapsed ?: 0f
+        internal set
+    var heat: Float = copySource?.heat ?: 0f
+        internal set
+    var overheated: Boolean = copySource?.overheated ?: false
+        internal set
+    var dashPhaseTime: Float = copySource?.dashPhaseTime ?: 0f
+        internal set
+    var hp: Float = copySource?.hp ?: 100f
+        internal set
+    var maxHp: Float = copySource?.maxHp ?: 100f
+        internal set
+    var shield: Float = copySource?.shield ?: 0f
+        internal set
+    var maxShield: Float = copySource?.maxShield ?: 0f
+        internal set
+
+    var combo: Int = copySource?.combo ?: 0
+        internal set
+    var comboTime: Float = copySource?.comboTime ?: 0f
+        internal set
+    var runGrace: Float = copySource?.runGrace ?: 0f
+        internal set
+
+    var polarityStability: Float = copySource?.polarityStability ?: 1f
+        internal set
+
+    var weapon: WeaponId = copySource?.weapon
+        ?: bootstrapProgress?.loadout?.selectedWeapon ?: WeaponId.FLUX_WAKE
+        internal set
+    var startingWeapon: WeaponId = copySource?.startingWeapon ?: weapon
+        internal set
+    var overdriveCharge: Float = copySource?.overdriveCharge ?: 0f
+        internal set
+    var overdriveTime: Float = copySource?.overdriveTime ?: 0f
+        internal set
+    var equippedRelics: List<EquippedRelic> = copySource?.equippedRelics ?: emptyList()
+        internal set
+
+    val enemies: MutableList<Enemy> = copySource?.enemies?.let { source ->
+        source.mapTo(ArrayList(source.size), Enemy::isolatedCopy)
+    } ?: mutableListOf()
+    val projectiles: MutableList<Projectile> = copySource?.projectiles?.let { source ->
+        source.mapTo(ArrayList(source.size), Projectile::isolatedCopy)
+    }
+        ?: mutableListOf()
+    val pickups: MutableList<Pickup> = copySource?.pickups?.let { source ->
+        source.mapTo(ArrayList(source.size), Pickup::copy)
+    }
+        ?: mutableListOf()
+    val trail: MutableList<TrailPoint> = copySource?.trail?.let { source ->
+        source.mapTo(ArrayList(source.size), TrailPoint::copy)
+    }
+        ?: mutableListOf()
+    val weaponNodes: MutableList<WeaponNode> = copySource?.weaponNodes?.let { source ->
+        source.mapTo(ArrayList(source.size), WeaponNode::copy)
+    }
+        ?: mutableListOf()
+
+    var choices: List<ChoiceOption> = copySource?.choices ?: emptyList()
+        internal set(value) {
+            require(value.size <= MAX_CHOICES) {
+                "choices cannot exceed $MAX_CHOICES entries"
+            }
+            field = value
+        }
+
+    val speed: Float get() = length(velocityX, velocityY)
+    internal var hostileTuning: HostileTuning
+        get() = varietyRun.hostileTuning
+        set(value) { varietyRun.hostileTuning = value }
+    val runProgress: Float get() = content.tempo.progress(elapsed)
+    val tetherDistance: Float
+        get() {
+            val tx = cameraX + pointerX - screenWidth * 0.5f
+            val ty = cameraY + pointerY - screenHeight * 0.5f
+            return length(tx - coreX, ty - coreY)
+        }
+    val dashReady: Boolean get() = !overheated && heat <= MAX_HEAT - dashHeatCost * 0.5f
+    val tetherAuthority: Float get() = polarityStability * polarityStability
+    val velocityTier: Int
+        get() = when {
+            speed >= 2_200f -> 4
+            speed >= 1_400f -> 3
+            speed >= 900f -> 2
+            speed >= 500f -> 1
+            else -> 0
+        }
+    val discoveredItemCount: Int get() = discoveredItemIds.size
+    val unlockedWeapons: Set<WeaponId> get() = unlockedWeaponView
+    val currentWeaponDefinition: WeaponDefinition get() = content.weapon(weapon)
+    val currentWeaponMastery: WeaponMastery get() = content.weaponMasteryForLevel(weaponLevel)
+    val nextWeaponMastery: WeaponMastery? get() = content.weaponMasteryAfter(weaponLevel)
+    val choiceType: ChoiceType get() = activeChoiceType
+    val choicesCanReroll: Boolean
+        get() = phase == GamePhase.CHOICE && directedReward == null && rerollsRemaining > 0 && when (activeChoiceType) {
+            ChoiceType.ITEM -> true
+            // Offers come from owned weapons only: with no more than one offer's worth a reroll would deal the same set.
+            ChoiceType.WEAPON -> weaponOfferCandidates().size > WEAPON_OFFER_CHOICES
+            ChoiceType.RELIC -> true
+            ChoiceType.TOTEM, ChoiceType.RELIC_BIND, ChoiceType.ACTIVE_SLOT -> false
+            // Omens and dimension boons are never rerolled; a signal prompt deals fixed options.
+            ChoiceType.OMEN, ChoiceType.SIGNAL, ChoiceType.BOON -> false
+        } && !dimensionRewardOpen()
+    val pendingRelicChoiceCount: Int get() = pendingChoice.pendingRelicChoices
+
+    fun relicRank(id: RelicId): Int = relicRanks[id.ordinal]
+
+    init {
+        if (copySource == null && startingWeapon !in unlockedWeaponSet) {
+            startingWeapon = WeaponId.FLUX_WAKE
+            weapon = startingWeapon
+        }
+    }
+
+    fun resize(width: Float, height: Float, density: Float = 1f) {
+        val newWidth = max(1f, width)
+        val newHeight = max(1f, height)
+        val dimensionsChanged = newWidth != screenWidth || newHeight != screenHeight
+        if (dimensionsChanged) {
+            pointerX = (pointerX / screenWidth * newWidth).coerceIn(0f, newWidth)
+            pointerY = (pointerY / screenHeight * newHeight).coerceIn(0f, newHeight)
+            screenWidth = newWidth
+            screenHeight = newHeight
+            previousSingularityX = cameraX + pointerX - screenWidth * 0.5f
+            previousSingularityY = cameraY + pointerY - screenHeight * 0.5f
+        }
+        uiScale = max(1f, density)
+        viewportDensity = density
+    }
+
+}
+
+/**
+ * The one explicit deep copy: reward previews, lifecycle commands, a tick while progress is pending and the pure
+ * test entry run on it, so the source is never mutated through it.
+ */
+internal fun MutableGameState.deepCopy(): MutableGameState =
+    MutableGameState(content = content, copySource = this)
+
+/**
+ * Allocation-free owner view over discoveries awaiting publication.
+ *
+ * The actual set is absent for the overwhelmingly common empty state. A deep copy only copies it when
+ * there is retained output to preserve.
+ */
+@JvmInline
+internal value class PendingDiscoveredItemIdBuffer(
+    private val owner: MutableGameState,
+) {
+    val size: Int
+        get() = owner.pendingDiscoveredItemIdStorage?.size ?: 0
+
+    fun isEmpty(): Boolean = owner.pendingDiscoveredItemIdStorage?.isEmpty() != false
+
+    fun isNotEmpty(): Boolean = owner.pendingDiscoveredItemIdStorage?.isNotEmpty() == true
+
+    operator fun contains(itemId: Int): Boolean =
+        owner.pendingDiscoveredItemIdStorage?.contains(itemId) == true
+
+    fun add(itemId: Int): Boolean {
+        owner.pendingDiscoveredItemIdStorage?.let { return it.add(itemId) }
+        owner.pendingDiscoveredItemIdStorage = RunMutableSet(mutableSetOf(itemId))
+        return true
+    }
+
+    operator fun plusAssign(itemId: Int) { add(itemId) }
+
+    fun clear() {
+        owner.pendingDiscoveredItemIdStorage = null
+    }
+
+    fun toList(): List<Int> = owner.pendingDiscoveredItemIdStorage?.toList().orEmpty()
+
+    fun toImmutableSet(): ImmutableSet<Int> =
+        owner.pendingDiscoveredItemIdStorage?.toImmutableSet() ?: immutableSetOf()
+
+    operator fun iterator(): Iterator<Int> =
+        owner.pendingDiscoveredItemIdStorage?.iterator() ?: emptySet<Int>().iterator()
+}
+
+/** Allocation-free owner view over the lazily materialized bounded audio batch. */
+@JvmInline
+internal value class PendingSoundCueBuffer(
+    private val owner: MutableGameState,
+) {
+    val size: Int
+        get() = owner.cueOutbox.soundCueStorage?.size ?: 0
+
+    fun isEmpty(): Boolean = owner.cueOutbox.soundCueStorage.isNullOrEmpty()
+
+    fun isNotEmpty(): Boolean = !owner.cueOutbox.soundCueStorage.isNullOrEmpty()
+
+    operator fun contains(cue: GameplayAudioCue): Boolean = owner.cueOutbox.soundCueStorage?.contains(cue) == true
+
+    fun add(cue: GameplayAudioCue): Boolean {
+        val retained = owner.cueOutbox.soundCueStorage
+        if (retained != null) return retained.add(cue)
+        owner.cueOutbox.soundCueStorage = arrayListOf(cue)
+        return true
+    }
+
+    operator fun plusAssign(cue: GameplayAudioCue) { add(cue) }
+
+    fun clear() {
+        owner.cueOutbox.soundCueStorage = null
+    }
+
+    fun toList(): List<GameplayAudioCue> = owner.cueOutbox.soundCueStorage?.toList().orEmpty()
+
+    fun toImmutableList(): ImmutableList<GameplayAudioCue> =
+        owner.cueOutbox.soundCueStorage?.toImmutableList() ?: immutableListOf()
+
+    operator fun iterator(): Iterator<GameplayAudioCue> =
+        owner.cueOutbox.soundCueStorage?.iterator() ?: emptyList<GameplayAudioCue>().iterator()
+}
+
+/** Allocation-free owner view over the lazily materialized visual batch. */
+@JvmInline
+internal value class PendingVisualFxCueBuffer(
+    private val owner: MutableGameState,
+) {
+    fun isEmpty(): Boolean = owner.cueOutbox.visualFxCueStorage?.isEmpty() != false
+
+    fun record(cue: VisualFxCue) {
+        val accumulator = owner.cueOutbox.visualFxCueStorage ?: BoundedVisualFxCueAccumulator().also {
+            owner.cueOutbox.visualFxCueStorage = it
+        }
+        accumulator.record(cue)
+    }
+
+    fun drain(): ImmutableList<VisualFxCue> {
+        val accumulator = owner.cueOutbox.visualFxCueStorage ?: return immutableListOf()
+        owner.cueOutbox.visualFxCueStorage = null
+        return accumulator.drain()
+    }
+}

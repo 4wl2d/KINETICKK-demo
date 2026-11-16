@@ -1,0 +1,202 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.api
+
+import kinetickk.ball.content.api.ContentBounds
+
+enum class GameplayRunPhase {
+    CREATED,
+    RUNNING,
+    PAUSED,
+    CHOICE,
+    GAME_OVER,
+    VICTORY,
+    EXITED,
+}
+
+object GameplayInteractionLimits {
+    const val MIN_FRAME_DELTA_SECONDS: Float = 0f
+    const val MAX_FRAME_DELTA_SECONDS: Float = 1f
+    const val MIN_VIEWPORT_DIMENSION_PX: Float = 1f
+    const val MAX_VIEWPORT_DIMENSION_PX: Float = 32_768f
+    const val MIN_DENSITY: Float = 0.5f
+    const val MAX_DENSITY: Float = 8f
+    const val MIN_CHOICE_INDEX: Int = 0
+    const val MAX_CHOICE_INDEX: Int = 3
+    /** Skill slots Z, X and C. */
+    const val MIN_SKILL_SLOT: Int = 0
+    const val MAX_SKILL_SLOT: Int = ContentBounds.SKILL_SLOTS - 1
+}
+
+/** Closed, already-validated Interaction intent inventory. */
+sealed interface GameplayInteractionPulse {
+    class FrameElapsed private constructor(
+        val realDeltaSeconds: Float,
+    ) : GameplayInteractionPulse {
+        companion object {
+            fun fromValidated(realDeltaSeconds: Float): FrameElapsed {
+                require(
+                    realDeltaSeconds.isFinite() &&
+                        realDeltaSeconds in
+                        GameplayInteractionLimits.MIN_FRAME_DELTA_SECONDS..
+                        GameplayInteractionLimits.MAX_FRAME_DELTA_SECONDS,
+                )
+                return FrameElapsed(realDeltaSeconds)
+            }
+        }
+    }
+
+    class ViewportChanged private constructor(
+        val width: Float,
+        val height: Float,
+        val density: Float,
+    ) : GameplayInteractionPulse {
+        companion object {
+            fun fromValidated(width: Float, height: Float, density: Float): ViewportChanged {
+                require(
+                    width.isFinite() &&
+                        width in
+                        GameplayInteractionLimits.MIN_VIEWPORT_DIMENSION_PX..
+                        GameplayInteractionLimits.MAX_VIEWPORT_DIMENSION_PX,
+                )
+                require(
+                    height.isFinite() &&
+                        height in
+                        GameplayInteractionLimits.MIN_VIEWPORT_DIMENSION_PX..
+                        GameplayInteractionLimits.MAX_VIEWPORT_DIMENSION_PX,
+                )
+                require(
+                    density.isFinite() &&
+                        density in GameplayInteractionLimits.MIN_DENSITY..
+                        GameplayInteractionLimits.MAX_DENSITY,
+                )
+                return ViewportChanged(width, height, density)
+            }
+        }
+    }
+
+    class PointerMoved private constructor(
+        val x: Float,
+        val y: Float,
+        val active: Boolean = true,
+    ) : GameplayInteractionPulse {
+        companion object {
+            fun fromValidated(x: Float, y: Float, active: Boolean = true): PointerMoved {
+                require(x.isFinite() && y.isFinite())
+                return PointerMoved(x, y, active)
+            }
+        }
+    }
+
+    data class BrakeChanged(val source: BrakeSource, val active: Boolean) : GameplayInteractionPulse
+    data object DashRequested : GameplayInteractionPulse
+    data object PauseToggled : GameplayInteractionPulse
+    /** Publishes held progress and acquired-item history at host stop, without changing the run phase. */
+    data object HostBackgrounded : GameplayInteractionPulse
+    class ChoiceSelected private constructor(
+        val index: Int,
+    ) : GameplayInteractionPulse {
+        companion object {
+            fun fromValidated(index: Int): ChoiceSelected {
+                require(
+                    index in GameplayInteractionLimits.MIN_CHOICE_INDEX..
+                        GameplayInteractionLimits.MAX_CHOICE_INDEX,
+                )
+                return ChoiceSelected(index)
+            }
+        }
+    }
+    data object ChoicesRerolled : GameplayInteractionPulse
+    data object UserGestureObserved : GameplayInteractionPulse
+
+    /**
+     * Whether the host takes the player's input: false while a session workflow lands (an overlay's pause on its
+     * way). The host reports every change from the default (available); Core Freeze holds while input is unavailable.
+     */
+    data class InputAvailabilityChanged(val available: Boolean) : GameplayInteractionPulse
+
+    /**
+     * Asks to cast the skill in [slot] (0 = Z, 1 = X, 2 = C). A running run buffers the request briefly and
+     * casts it once the slot can; an empty slot or a run that is not running accepts it without a change.
+     */
+    class SkillRequested private constructor(
+        val slot: Int,
+    ) : GameplayInteractionPulse {
+        override fun toString(): String = "SkillRequested(slot=$slot)"
+
+        companion object {
+            private val bySlot: Array<SkillRequested> = Array(
+                GameplayInteractionLimits.MAX_SKILL_SLOT - GameplayInteractionLimits.MIN_SKILL_SLOT + 1,
+            ) { index -> SkillRequested(GameplayInteractionLimits.MIN_SKILL_SLOT + index) }
+
+            /** One shared instance per slot, so key and touch input allocate nothing. */
+            fun fromValidated(slot: Int): SkillRequested {
+                require(
+                    slot in GameplayInteractionLimits.MIN_SKILL_SLOT..
+                        GameplayInteractionLimits.MAX_SKILL_SLOT,
+                )
+                return bySlot[slot - GameplayInteractionLimits.MIN_SKILL_SLOT]
+            }
+        }
+    }
+
+    /**
+     * Asks to cast the character's Apex. While the run has no Apex runtime the reducer accepts it
+     * without changing state.
+     */
+    data object ApexRequested : GameplayInteractionPulse
+}
+
+enum class BrakeSource { KEYBOARD, SECONDARY_POINTER, TOUCH_CONTROL }
+
+enum class GameplayConfigurationRejection {
+    INVALID_PREFERENCES,
+    STARTING_WEAPON_MISSING,
+    STARTING_WEAPON_LOCKED,
+    MATRIX_RANK_COUNT_MISMATCH,
+    MATRIX_RANK_OUT_OF_RANGE,
+    UNKNOWN_DISCOVERED_ITEM,
+    UNKNOWN_DISCOVERED_RELIC,
+    NEGATIVE_MATTER,
+    LIFETIME_MATTER_BELOW_CURRENT,
+    /** A Refit or Honing list has the wrong size, or a level lies outside `0..UpgradePolicy.maxLevel`. */
+    UPGRADE_LEVEL_OUT_OF_RANGE,
+    /** The recent-item history holds more than `MAX_RECENT_ITEM_IDS` entries or an id outside the captured catalog. */
+    RECENT_ITEM_HISTORY_INVALID,
+}
+
+sealed interface GameplayRejection {
+    data object NotStarted : GameplayRejection
+    data object AlreadyStarted : GameplayRejection
+    data object RunExited : GameplayRejection
+    data object PauseUnavailable : GameplayRejection
+    data object ProgressPending : GameplayRejection
+    data object ProfileBootstrapUnavailable : GameplayRejection
+    data object InvalidPreferencesProjection : GameplayRejection
+
+    data class InvalidStartConfiguration(
+        val reason: GameplayConfigurationRejection,
+    ) : GameplayRejection
+
+    data class PointerOutsideViewport(
+        val axis: GameplayPointerAxis,
+    ) : GameplayRejection
+}
+
+enum class GameplayPointerAxis { HORIZONTAL, VERTICAL }
+
+sealed interface GameplayAcceptance {
+    val instanceId: GameplayInstanceId
+
+    data class Accepted(
+        override val instanceId: GameplayInstanceId,
+        val revision: GameplayRevision,
+    ) : GameplayAcceptance
+
+    data class Rejected(
+        override val instanceId: GameplayInstanceId,
+        val observedRevision: GameplayRevision,
+        val reason: GameplayRejection,
+    ) : GameplayAcceptance
+}

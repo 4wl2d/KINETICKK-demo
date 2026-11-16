@@ -3,39 +3,22 @@ SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 
 KINETICKK DEMO NOTICE
 
-Copyright (C) 2026 Vladislav Tomilov.
+Required Notice: Copyright (C) 2026 Vladislav Tomilov (https://github.com/4wl2d/KINETICKK-demo)
 
-This repository holds the free demo of KINETICKK. It is licensed under the
-PolyForm Noncommercial License 1.0.0 (see LICENSE). The source is public so that it
-can be read, built, studied and changed for noncommercial purposes; it is not open
-source software in the sense of the Open Source Definition.
+The PolyForm Noncommercial License 1.0.0 in LICENSE covers the original demo
+source code, game content, and assets made available in this repository, including
+those materials in distributed demo builds. The full KINETICKK game is licensed
+separately. Earlier distributions are governed by the licenses that accompanied
+those copies.
 
-THE FULL GAME
+The license allows use, copying, adaptation, and redistribution for the purposes
+specified in its terms. Pass on a copy of LICENSE or its URL and the Required
+Notice above when sharing any of the covered material. Commercial use outside
+the license grant requires permission from Vladislav Tomilov.
 
-The full game is a separate product, sold separately under its own license. That
-license, and not this one, covers the full game, its builds and any material that is
-not published in this repository.
+Store terms may also apply to copies delivered through an application store.
+Rights in the KINETICKK name, logo, and other branding remain reserved. Use
+distinct branding for modified builds and identify their origin accurately.
 
-OFFICIAL DEMO BUILDS
-
-Vladislav Tomilov publishes official builds of the demo, including through
-application stores. A store's terms apply to the copies it delivers, alongside the
-license in LICENSE.
-
-CHANGES TO THIS REPOSITORY
-
-The files here are exported from the game's development repository, so pull
-requests are not merged.
-
-TRADEMARKS
-
-The license grants no rights in the KINETICKK name, logo or other branding, or in
-the name of Vladislav Tomilov. A modified version must use a clearly different name,
-remove the official logo and store artwork, and say that it is not made or endorsed
-by Vladislav Tomilov.
-
-THIRD-PARTY MATERIAL
-
-Third-party components, fonts and other material keep their own licenses, which
-this notice and LICENSE do not change. When the demo's source is published, their
-notices and license texts are published with it.
+Third-party components and fonts retain their own copyright and license terms.
+See LICENSES/README.md for the notices and their locations in distributed builds.

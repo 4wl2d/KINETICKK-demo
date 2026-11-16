@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.profile.interaction.localization
+
+internal object RussianProfileText {
+    operator fun get(key: ProfileText): String = when (key) {
+        ProfileText.SettingsInterface -> "Интерфейс"
+        ProfileText.SettingsDisplay -> "Экран"
+        ProfileText.SettingsControls -> "Управление"
+        ProfileText.RunStatisticsSide -> "Статистика забега"
+        ProfileText.LeftSide -> "Слева"
+        ProfileText.RightSide -> "Справа"
+        ProfileText.PreviousPage -> "Предыдущая страница"
+        ProfileText.NextPage -> "Следующая страница"
+        ProfileText.SettingsTitle -> "Настройки"
+        ProfileText.SettingsGame -> "Игра"
+        ProfileText.SettingsSound -> "Звук"
+        ProfileText.VolumePercent -> "Громкость в процентах, 0–100"
+        ProfileText.SettingsGraphics -> "Графика"
+        ProfileText.Language -> "Язык"
+        ProfileText.Sfx -> "Звуки"
+        ProfileText.Music -> "Музыка"
+        ProfileText.MasterVolume -> "Общая громкость"
+        ProfileText.SimulationSpeed -> "Скорость игры"
+        ProfileText.TextSize -> "Размер текста"
+        ProfileText.ScreenShake -> "Тряска экрана"
+        ProfileText.Particles -> "Частицы"
+        ProfileText.DamageNumbers -> "Числа урона"
+        ProfileText.DamageNumberSize -> "Размер чисел"
+        ProfileText.DamageNumberFormat -> "Формат чисел"
+        ProfileText.DamageColorTiers -> "Цвет урона"
+        ProfileText.On -> "Вкл"
+        ProfileText.Off -> "Выкл"
+        ProfileText.Low -> "Мало"
+        ProfileText.Normal -> "Норма"
+        ProfileText.High -> "Много"
+        ProfileText.Small -> "Малый"
+        ProfileText.Large -> "Крупный"
+        ProfileText.Huge -> "Огромный"
+        ProfileText.Compact -> "Кратко"
+        ProfileText.Full -> "Полно"
+        ProfileText.MaximumSynchrony -> "Максимум"
+        ProfileText.CoreIntegrity -> "Прочность ядра"
+        ProfileText.KineticMatter -> "Кинетическая материя"
+    }
+}

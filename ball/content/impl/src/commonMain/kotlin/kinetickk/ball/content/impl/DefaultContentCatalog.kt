@@ -1,0 +1,285 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.content.impl
+
+import kinetickk.ball.content.api.BuildCatalog
+import kinetickk.ball.content.api.ContentBounds
+import kinetickk.ball.content.api.ContentCatalog
+import kinetickk.ball.content.api.ContentVersion
+import kinetickk.ball.content.api.CoreShape
+import kinetickk.ball.content.api.defaultCoreShapeDefinitions
+import kinetickk.ball.content.api.CoreShapeDefinition
+import kinetickk.ball.content.api.DimensionPolicy
+import kinetickk.ball.content.api.EnemyDefinition
+import kinetickk.ball.content.api.EnemyHabitat
+import kinetickk.ball.content.api.EnemyType
+import kinetickk.ball.content.api.GameplayContentSnapshot
+import kinetickk.ball.content.api.ItemDefinition
+import kinetickk.ball.content.api.KINETICKK_CONTENT_VERSION
+import kinetickk.ball.content.api.MatrixNodeDefinition
+import kinetickk.ball.content.api.MatrixNodeId
+import kinetickk.ball.content.api.defaultMatrixNodes
+import kinetickk.ball.content.api.ProfilePolicySnapshot
+import kinetickk.ball.content.api.RelicDefinition
+import kinetickk.ball.content.api.RelicId
+import kinetickk.ball.content.api.RelicPolicy
+import kinetickk.ball.content.api.RunBoonDefinition
+import kinetickk.ball.content.api.RunVarietyContent
+import kinetickk.ball.content.api.SitePolicy
+import kinetickk.ball.content.api.UiCatalogSnapshot
+import kinetickk.ball.content.api.WeaponDefinition
+import kinetickk.ball.content.api.WeaponId
+import kinetickk.ball.content.api.WeaponMastery
+import kinetickk.ball.content.api.RunTempoProfile
+import kinetickk.ball.content.api.SkillDefinition
+import kinetickk.ball.content.api.SkillId
+import kinetickk.ball.content.api.UpgradePolicy
+import kinetickk.ball.content.api.defaultBuildCatalog
+import kinetickk.ball.content.api.defaultEnemyDefinitions
+import kinetickk.ball.content.api.defaultRunBoons
+import kinetickk.ball.content.api.defaultSkillDefinitions
+import kinetickk.ball.content.api.validateStructurePolicy
+import kinetickk.foundation.collections.toImmutableList
+
+/** Creates the query-only Content authority that application composition owns for its lifetime. */
+fun createContentCatalog(): ContentCatalog =
+    DefaultContentCatalog(defaultContentBootstrapData())
+
+internal data class ContentBootstrapData(
+    val version: ContentVersion,
+    val items: List<ItemDefinition>,
+    val weapons: List<WeaponDefinition>,
+    val weaponMasteries: List<WeaponMastery>,
+    val matrixNodes: List<MatrixNodeDefinition>,
+    val relics: List<RelicDefinition>,
+    val coreShapes: List<CoreShapeDefinition>,
+    val relicPolicy: RelicPolicy,
+    val tempo: RunTempoProfile = RunTempoProfile(),
+    val build: BuildCatalog = defaultBuildCatalog(),
+    val enemies: List<EnemyDefinition> = defaultEnemyDefinitions(),
+    val skills: List<SkillDefinition> = defaultSkillDefinitions(),
+    val upgrades: UpgradePolicy = UpgradePolicy(),
+    val sites: SitePolicy = SitePolicy(),
+    val variety: RunVarietyContent = RunVarietyContent(),
+    val dimensions: DimensionPolicy = DimensionPolicy(),
+    val boons: List<RunBoonDefinition> = defaultRunBoons(),
+)
+
+internal fun defaultContentBootstrapData(): ContentBootstrapData = ContentBootstrapData(
+    version = KINETICKK_CONTENT_VERSION,
+    items = defaultItems(),
+    weapons = defaultWeapons(),
+    weaponMasteries = WeaponMastery.entries,
+    matrixNodes = defaultMatrixNodes(),
+    relics = defaultRelics(),
+    coreShapes = defaultCoreShapeDefinitions(),
+    relicPolicy = RelicPolicy(maxSlots = 4, maxRank = 3),
+)
+
+internal fun createContentCatalogForTesting(data: ContentBootstrapData): ContentCatalog =
+    DefaultContentCatalog(data)
+
+private class DefaultContentCatalog(data: ContentBootstrapData) : ContentCatalog {
+    init {
+        validateBootstrap(data)
+    }
+
+    override val version: ContentVersion = data.version
+
+    private val items = data.items.toImmutableList()
+    private val weapons = data.weapons.toImmutableList()
+    private val weaponMasteries = data.weaponMasteries.toImmutableList()
+    private val matrixNodes = data.matrixNodes.toImmutableList()
+    private val relics = data.relics.toImmutableList()
+    private val coreShapes = data.coreShapes.toImmutableList()
+    private val enemies = data.enemies.toImmutableList()
+    private val skills = data.skills.toImmutableList()
+    private val boons = data.boons.toImmutableList()
+
+    private val profilePolicy = ProfilePolicySnapshot(
+        version = version,
+        itemCount = items.size,
+        coreShapes = coreShapes,
+        weapons = weapons,
+        matrixNodes = matrixNodes,
+        upgrades = data.upgrades,
+    )
+
+    private val gameplayContent = GameplayContentSnapshot(
+        version = version,
+        items = items,
+        weapons = weapons,
+        weaponMasteries = weaponMasteries,
+        relics = relics,
+        relicPolicy = data.relicPolicy,
+        sites = data.sites,
+        tempo = data.tempo,
+        build = data.build,
+        coreShapes = coreShapes,
+        enemies = enemies,
+        matrixNodes = matrixNodes,
+        skills = skills,
+        upgrades = data.upgrades,
+        dimensions = data.dimensions,
+        boons = boons,
+        variety = data.variety,
+    )
+
+    init {
+        validateStructurePolicy(gameplayContent.structures, enemies, gameplayContent.obstacles)
+    }
+
+    private val uiCatalog = UiCatalogSnapshot(
+        version = version,
+        items = items,
+        weapons = weapons,
+        weaponMasteries = weaponMasteries,
+        relics = relics,
+        coreShapes = coreShapes,
+        relicPolicy = data.relicPolicy,
+        sites = data.sites,
+        tempo = data.tempo,
+        build = data.build,
+        enemies = enemies,
+        matrixNodes = matrixNodes,
+        skills = skills,
+        upgrades = data.upgrades,
+    )
+
+    override fun profilePolicy(): ProfilePolicySnapshot = profilePolicy
+
+    override fun gameplayContent(): GameplayContentSnapshot = gameplayContent
+
+    override fun uiCatalog(): UiCatalogSnapshot = uiCatalog
+}
+
+private fun validateBootstrap(data: ContentBootstrapData) {
+    require(data.version == KINETICKK_CONTENT_VERSION) {
+        "Content version must be exactly ${KINETICKK_CONTENT_VERSION.value}"
+    }
+
+    requireBound("items", data.items.size, ContentBounds.MAX_ITEMS)
+    requireUniqueIds("item", data.items.map(ItemDefinition::id))
+    require(data.items.withIndex().all { (index, item) -> item.id == index }) {
+        "Item ids must be contiguous and ordered from zero"
+    }
+    require(data.items.all { item -> item.unlockLevel <= data.tempo.maximumLevel }) {
+        "Item unlock levels must not exceed the maximum run level ${data.tempo.maximumLevel}"
+    }
+    validateActiveItems(data.items, data.skills)
+
+    requireBound("weapons", data.weapons.size, ContentBounds.MAX_WEAPONS)
+    requireUniqueIds("weapon", data.weapons.map(WeaponDefinition::id))
+    require(data.weapons.map(WeaponDefinition::id) == WeaponId.entries.toList()) {
+        "Weapon ids must match the stable WeaponId order"
+    }
+
+    requireBound("matrix nodes", data.matrixNodes.size, ContentBounds.MAX_MATRIX_NODES)
+    requireUniqueIds("matrix-node", data.matrixNodes.map(MatrixNodeDefinition::id))
+    require(data.matrixNodes.map(MatrixNodeDefinition::id) == MatrixNodeId.entries.toList()) {
+        "Matrix node ids must match the stable MatrixNodeId order"
+    }
+    validateMatrix(data.matrixNodes)
+
+    requireBound("relics", data.relics.size, ContentBounds.MAX_RELICS)
+    requireUniqueIds("relic", data.relics.map(RelicDefinition::id))
+    require(data.relics.map(RelicDefinition::id) == RelicId.entries.toList()) {
+        "Relic ids must match the stable RelicId order"
+    }
+
+    validatePairings(data.relics, data.build)
+    require(data.build.pairings.all { pairing ->
+        data.relics.any { it.id == pairing.first } && data.relics.any { it.id == pairing.second }
+    }) { "Pairings must join catalog Relics" }
+    validateBuildReferences(data.items, data.build)
+
+    requireUniqueIds("core-shape", data.coreShapes.map(CoreShapeDefinition::id))
+    require(data.coreShapes.map(CoreShapeDefinition::id) == CoreShape.entries.toList()) {
+        "Core shape ids must match the stable CoreShape order"
+    }
+    require(data.coreShapes.map { it.apex.name }.toSet().size == data.coreShapes.size) { "Apex names must be unique" }
+
+    requireUniqueIds("weapon-mastery", data.weaponMasteries)
+    require(data.weaponMasteries == WeaponMastery.entries.toList()) {
+        "Weapon mastery ids must match the stable WeaponMastery order"
+    }
+
+    validateEnemies(data.enemies)
+    validateSkills(data.skills)
+    validateSites(data.sites, data.enemies)
+    validateRunVariety(data)
+    requireBound("boons", data.boons.size, ContentBounds.MAX_BOON_DEFINITIONS)
+    requireUniqueIds("Boon", data.boons.map(RunBoonDefinition::id))
+    validateDimensions(data)
+
+    require(data.relicPolicy.maxSlots <= data.relics.size) {
+        "Relic maxSlots must not exceed the relic catalog size"
+    }
+}
+
+private fun validateMatrix(nodes: List<MatrixNodeDefinition>) {
+    require(nodes.map(MatrixNodeDefinition::name).toSet().size == nodes.size) { "Matrix node names must be unique" }
+}
+
+/**
+ * Every active effect is carried by exactly one item, which repeats the effect's name, its tags in the same order and
+ * its element: offers, cards and build points read the item, casting reads the effect. An effect missing from
+ * [skills] is left to [validateSkills].
+ */
+private fun validateActiveItems(items: List<ItemDefinition>, skills: List<SkillDefinition>) {
+    SkillId.entries.forEach { id ->
+        val carriers = items.filter { it.active == id }
+        require(carriers.size == 1) { "Active effect $id must be carried by exactly one item, not ${carriers.size}" }
+        val item = carriers.single()
+        val effect = skills.firstOrNull { it.id == id } ?: return@forEach
+        require(item.name == effect.name) { "${item.name} must carry the name of its active effect ${effect.name}" }
+        require(item.tags == effect.tags) { "${item.name} must carry the tags of its active effect in order: ${effect.tags}" }
+        require(item.elements == listOfNotNull(effect.element)) {
+            "${item.name} must carry exactly the element of its active effect: ${effect.element}"
+        }
+    }
+}
+
+/** One skill per [SkillId] in order, with distinct names; each definition validates its own ranks. */
+private fun validateSkills(skills: List<SkillDefinition>) {
+    requireBound("skills", skills.size, ContentBounds.MAX_SKILLS)
+    requireUniqueIds("skill", skills.map(SkillDefinition::id))
+    require(skills.map(SkillDefinition::id) == SkillId.entries.toList()) {
+        "Skill ids must match the stable SkillId order"
+    }
+    require(skills.map(SkillDefinition::name).toSet().size == skills.size) { "Skill names must be unique" }
+}
+
+private fun requireBound(name: String, size: Int, maximum: Int) {
+    require(size <= maximum) { "$name size $size exceeds bootstrap bound $maximum" }
+}
+
+private fun requireUniqueIds(name: String, ids: List<*>) {
+    require(ids.toSet().size == ids.size) { "$name ids must be unique" }
+}
+
+/**
+ * The roster follows [EnemyType] order exactly; the Architect is the only boss, the Elite the only scheduled Elite
+ * and every habitat opens with an ordinary kind at second 0.
+ */
+private fun validateEnemies(enemies: List<EnemyDefinition>) {
+    requireBound("enemies", enemies.size, ContentBounds.MAX_ENEMY_TYPES)
+    requireUniqueIds("enemy", enemies.map(EnemyDefinition::type))
+    require(enemies.map(EnemyDefinition::type) == EnemyType.entries.toList()) { "Enemy types must match the stable EnemyType order" }
+    require(enemies.filter(EnemyDefinition::isBoss).map(EnemyDefinition::type) == listOf(EnemyType.ARCHITECT)) {
+        "The Architect must be the only boss"
+    }
+    require(enemies.filter(EnemyDefinition::isElite).map(EnemyDefinition::type) == listOf(EnemyType.ELITE)) {
+        "The Elite must be the only scheduled Elite"
+    }
+    require(enemies.filterNot(EnemyDefinition::isScheduled).all { definition ->
+        EnemyHabitat.entries.all { habitat -> (definition.weightIn(habitat) > 0f) == definition.livesIn(habitat) }
+    }) { "Every ordinary enemy must carry spawn weight in exactly its habitats" }
+    require(EnemyHabitat.entries.all { habitat ->
+        enemies.any { !it.isScheduled && it.weightIn(habitat) > 0f && it.timeGateSeconds <= 0f }
+    }) { "At least one ordinary enemy must be available from the first second in every habitat" }
+    val secrets = enemies.filter(EnemyDefinition::isSecretBoss).map(EnemyDefinition::revealedBy)
+    require(secrets.toSet().size == secrets.size) { "Secret bosses need distinct discoveries" }
+    require(enemies.map(EnemyDefinition::name).toSet().size == enemies.size) { "Enemy names must be unique" }
+}

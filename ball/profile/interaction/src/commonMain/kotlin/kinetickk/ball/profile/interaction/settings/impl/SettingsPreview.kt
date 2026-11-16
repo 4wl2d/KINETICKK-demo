@@ -1,0 +1,550 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.profile.interaction.settings.impl
+
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import kinetickk.ball.profile.api.ColorVision
+import kinetickk.ball.profile.api.GameAction
+import kinetickk.ball.profile.api.WindowMode
+import kinetickk.ball.profile.api.DAMAGE_NUMBER_TIER_THRESHOLD_OPTIONS
+import kinetickk.ball.profile.api.ParticleDensity
+import kinetickk.ball.profile.api.PlayerPreferences
+import kinetickk.ball.profile.api.formatDamageNumber
+import kinetickk.ball.profile.interaction.localization.ProfileText
+import kinetickk.ball.profile.interaction.localization.SettingsRedesignText
+import kinetickk.foundation.common.localization.AppLanguage
+import kinetickk.foundation.common.localization.text
+import kinetickk.foundation.design.Kk
+import kinetickk.foundation.design.KkAlign
+import kinetickk.foundation.design.KkButtonSize
+import kinetickk.foundation.design.KkButtonVariant
+import kinetickk.foundation.design.KkEase
+import kinetickk.foundation.design.KkRolePalette
+import kinetickk.foundation.design.KkVAlign
+import kinetickk.foundation.design.KkVisionMode
+import kinetickk.foundation.design.bodyStyle
+import kinetickk.foundation.design.condStyle
+import kinetickk.foundation.design.drawKkButton
+import kinetickk.foundation.design.drawKkGrid
+import kinetickk.foundation.design.drawKkSlab
+import kinetickk.foundation.design.drawKkSheared
+import kinetickk.foundation.design.drawKkText
+import kinetickk.foundation.design.drawKkThreatHatch
+import kinetickk.foundation.design.kkButtonWidth
+import kinetickk.foundation.design.kkLoop
+import kinetickk.foundation.design.kkPulse
+import kinetickk.foundation.design.label
+import kinetickk.foundation.design.kkShake
+import kinetickk.foundation.design.kkStroke
+import kinetickk.foundation.design.labelStyle
+import kinetickk.foundation.design.measureKkText
+import kinetickk.foundation.design.monoStyle
+import kinetickk.foundation.design.wideStyle
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
+
+/** Board width of the preview column (`Settings.dc.html` aside, 336 px); contents scale with it. */
+private const val PREVIEW_UNITS = 336f
+
+/** The Graphics arena's height in board units. */
+private const val ARENA_HEIGHT = 300f
+
+/** A sample damage number's loop and the share of a second it drifts for. */
+private const val NUMBER_LOOP = 2.4f
+private const val NUMBER_DRIFT = 0.6f
+
+/** Preview role palette for the Color vision value being edited (the rest of the screen reads the provided palette). */
+internal fun ColorVision.previewPalette(): KkRolePalette = when (this) {
+    ColorVision.DEFAULT -> KkVisionMode.DEFAULT.palette
+    ColorVision.PROTAN -> KkVisionMode.PROTAN.palette
+    ColorVision.DEUTAN -> KkVisionMode.DEUTAN.palette
+    ColorVision.TRITAN -> KkVisionMode.TRITAN.palette
+    ColorVision.MONO -> KkVisionMode.MONO.palette
+}
+
+/** Height in board units of the preview for [group] (arena or scene box plus its companion strip). */
+internal fun settingsPreviewUnits(group: SettingsGroup): Float = when (group) {
+    SettingsGroup.GAME -> 240f
+    SettingsGroup.SOUND -> 250f
+    SettingsGroup.DISPLAY -> DISPLAY_SCREEN_HEIGHT + 32f + DISPLAY_STRIP_HEIGHT + 16f + DISPLAY_BUTTON_HEIGHT * 1.3f
+    SettingsGroup.GRAPHICS -> 300f + 12f + 30f + 6f + 14f
+    SettingsGroup.INTERFACE -> 110f + 12f + 110f
+    SettingsGroup.CONTROLS -> (KEYCAP_HEIGHT + 30f) * 2f
+}
+
+private const val DISPLAY_SCREEN_HEIGHT = 190f
+private const val DISPLAY_STRIP_HEIGHT = 30f
+private const val DISPLAY_BUTTON_HEIGHT = 52f
+private const val KEYCAP_WIDTH = 64f
+private const val KEYCAP_HEIGHT = 48f
+
+/** Live preview column: reacts to the current values of the selected tab. */
+internal fun DrawScope.drawSettingsPreview(area: Rect, frame: SettingsFrame, measurers: SettingsMeasurers) {
+    val group = frame.layout.group
+    val u = area.width / PREVIEW_UNITS
+    val scale = min(1f, area.height / (settingsPreviewUnits(group) * u))
+    val unit = u * scale
+    val box = Rect(area.left, area.top, area.left + PREVIEW_UNITS * unit, area.top)
+    val preview = PreviewScope(this, box.left, box.top, unit, measurers, frame.preferences, frame.time)
+    when (group) {
+        SettingsGroup.GAME -> preview.game()
+        SettingsGroup.SOUND -> preview.sound()
+        SettingsGroup.DISPLAY -> preview.display(frame.platform)
+        SettingsGroup.GRAPHICS -> preview.graphics()
+        SettingsGroup.INTERFACE -> preview.interfaceSample()
+        SettingsGroup.CONTROLS -> preview.controls(frame)
+    }
+}
+
+private class PreviewScope(
+    val draw: DrawScope,
+    val left: Float,
+    val top: Float,
+    val u: Float,
+    val measurers: SettingsMeasurers,
+    val preferences: PlayerPreferences,
+    val time: Float,
+) {
+    val language = measurers.language
+    /** Text measurer at the preview's own scale (board px × unit). */
+    val text = measurers.at(u / draw.density)
+
+    fun x(value: Float) = left + value * u
+    fun y(value: Float) = top + value * u
+    fun at(xValue: Float, yValue: Float) = Offset(x(xValue), y(yValue))
+    fun rect(l: Float, t: Float, r: Float, b: Float) = Rect(x(l), y(t), x(r), y(b))
+
+    /** `.pv`: ink-1 box with a 16 px grid and a 1 px line inset. */
+    fun box(height: Float, grid: Boolean = true): Rect {
+        val bounds = rect(0f, 0f, PREVIEW_UNITS, height)
+        draw.drawRect(Kk.Ink1, bounds.topLeft, bounds.size)
+        if (grid) draw.drawKkGrid(bounds, Kk.Bone.copy(alpha = 0.04f), spacingDp = 16f * u / draw.density, origin = bounds.topLeft)
+        val inset = 0.5f * u
+        draw.drawRect(Kk.Line, Offset(bounds.left + inset, bounds.top + inset), Size(bounds.width - inset * 2f, bounds.height - inset * 2f), style = kkStroke(u))
+        return bounds
+    }
+
+    fun panel(bounds: Rect, outline: Color? = null) {
+        draw.drawRect(Kk.Ink2, bounds.topLeft, bounds.size)
+        if (outline != null) {
+            val inset = 0.75f * u
+            draw.drawRect(outline, Offset(bounds.left + inset, bounds.top + inset), Size(bounds.width - inset * 2f, bounds.height - inset * 2f), style = kkStroke(1.5f * u))
+        }
+    }
+
+    /** Game: the Core orbits the singularity at the simulation speed; the word shows the language. */
+    fun game() {
+        val bounds = box(240f)
+        val roles = measurers.roles
+        val center = at(168f, 120f)
+        val period = 3f / preferences.simulationSpeed.coerceAtLeast(0.1f)
+        val angle = (kkLoop(time, period) * 2f * PI).toFloat() - PI.toFloat() * 0.35f
+        val core = Offset(center.x + cos(angle) * 82f * u, center.y + sin(angle) * 82f * u)
+        val tailAngle = angle - 20f * PI.toFloat() / 180f
+        val tailEnd = Offset(center.x + cos(angle) * 70f * u, center.y + sin(angle) * 70f * u)
+        val tailStart = Offset(tailEnd.x - cos(tailAngle) * 60f * u, tailEnd.y - sin(tailAngle) * 60f * u)
+        draw.drawLine(Brush.linearGradient(listOf(Color.Transparent, roles.you), tailStart, tailEnd), tailStart, tailEnd, 2f * u)
+        singularity(center, 15f, 4f)
+        coreDisc(core, 12f)
+        // `.t-cond` 34 px, 14 px from the right and 12 px from the bottom of its line box.
+        draw.drawKkText(
+            text, preferences.language.nativeName, measurers.typography.condStyle(34f),
+            bounds.right - 14f * u, bounds.bottom - (12f + 34f * 0.86f * 0.5f) * u, Kk.Bone,
+            align = KkAlign.END, valign = KkVAlign.CENTER, uppercase = true,
+        )
+    }
+
+    /** Sound: level bars per channel (master bone, music polarity, effects you), pulsing while awake. */
+    fun sound() {
+        box(250f, grid = false)
+        val roles = measurers.roles
+        val master = preferences.masterVolume
+        val channels = listOf(
+            Triple(Kk.Bone, master, language.text(SettingsRedesignText.MasterShort)),
+            Triple(roles.pol, if (preferences.musicEnabled) master else 0f, language.text(ProfileText.Music)),
+            Triple(roles.you, if (preferences.soundEnabled) master else 0f, language.text(ProfileText.Sfx)),
+        )
+        val innerLeft = 18f
+        val innerWidth = PREVIEW_UNITS - 36f
+        val baseline = 250f - 46f
+        channels.forEachIndexed { group, (color, level, label) ->
+            val slot = innerWidth / channels.size
+            val centerX = innerLeft + slot * (group + 0.5f)
+            val barWidth = 9f
+            val gap = 4f
+            val total = barWidth * 5f + gap * 4f
+            val height = max(8f, 170f * level)
+            for (bar in 0 until 5) {
+                val period = 0.6f + ((bar + group) % 3) * 0.25f
+                val phase = kkLoop(time, period, delay = -bar * 0.17f)
+                val wave = 0.5f - 0.5f * cos(phase * 2f * PI.toFloat())
+                val barHeight = height * (0.35f + 0.65f * wave)
+                val barLeft = centerX - total * 0.5f + (barWidth + gap) * bar
+                // Upright bars: the board's pv-eq transform replaces the skew, and sheared bars this
+                // tall would lean into their neighbours.
+                val bar = rect(barLeft, baseline - barHeight, barLeft + barWidth, baseline)
+                draw.drawRect(color, bar.topLeft, bar.size, alpha = if (level > 0f) 1f else 0.35f)
+            }
+            draw.drawKkText(
+                text, label, measurers.typography.labelStyle(12f), x(centerX), y(250f - 22f), Kk.Bone,
+                align = KkAlign.CENTER, valign = KkVAlign.CENTER, uppercase = true,
+            )
+        }
+    }
+
+    /** Graphics: a mini arena with the edited palette, shake, particles and damage numbers. */
+    fun graphics() {
+        val palette = preferences.colorVision.previewPalette()
+        val bounds = box(ARENA_HEIGHT)
+        val shake = if (preferences.screenShake) shakeOffset() else Offset.Zero
+        draw.clipRect(bounds.left, bounds.top, bounds.right, bounds.bottom) {
+            translate(shake.x * u, shake.y * u) {
+                arena(palette)
+            }
+        }
+        // Role swatches: five sheared chips with their names.
+        val names = settingsRoleSwatches(palette)
+        val gap = 6f
+        val width = (PREVIEW_UNITS - gap * 4f) / 5f
+        names.forEachIndexed { index, (name, color) ->
+            val chipLeft = (width + gap) * index
+            val chip = rect(chipLeft, 312f, chipLeft + width, 342f)
+            draw.drawKkSheared(chip, color)
+            if (index == SETTINGS_THREAT_SWATCH) draw.drawKkThreatHatch(chip, palette, Kk.Ink)
+            // `.t-mono` 9 px; a longer translation falls back to the condensed label face.
+            val label = language.text(name)
+            val lane = (width + 4f) * u
+            val mono = measureKkText(text, label, measurers.typography.monoStyle(9f), uppercase = true)
+            val layout = if (mono.size.width <= lane) mono else {
+                measureKkText(text, label, measurers.typography.labelStyle(11f, trackingEm = 0.04f), uppercase = true, maxWidth = lane)
+            }
+            draw.drawKkText(layout, x(chipLeft), y(348f), Kk.Mute)
+        }
+    }
+
+    fun shakeOffset(): Offset {
+        // The game's shake: a hard hit every 1.6 s whose sway fades over 0.8 s, then calm.
+        val trauma = 1f - kkLoop(time, 1.6f) * 2f
+        return kkShake(trauma, time, 4f)
+    }
+
+    fun arena(palette: KkRolePalette) {
+        val enemy = Kk.Ink1
+        // Enemies: ink fill, threat outline; Mono hatches every threat.
+        polygon(floatArrayOf(70f, 70f, 88f, 102f, 52f, 102f), enemy, palette)
+        polygon(floatArrayOf(250f, 60f, 268f, 78f, 250f, 96f, 232f, 78f), enemy, palette)
+        polygon(floatArrayOf(262f, 190f, 288f, 190f, 288f, 216f, 262f, 216f), enemy, palette)
+        for ((bx, by) in listOf(120f to 200f, 140f to 186f, 232f to 170f)) {
+            bullet(at(bx, by), palette)
+        }
+        // Tether from the Core towards the singularity.
+        draw.drawLine(palette.you.copy(alpha = 0.45f), at(168f, 150f), at(58f, 205f), 10f * u)
+        // Core halo: integrity arc (bone), heat arc, dashed shield ring, Core disc.
+        val core = at(168f, 150f)
+        draw.drawCircle(Kk.Bone.copy(alpha = 0.16f), 30f * u, core, style = Stroke(4f * u))
+        arc(core, 30f, 138f, 84f, Kk.Bone, 4f)
+        arc(core, 30f, -42f, 84f, palette.heat, 4f)
+        draw.drawCircle(palette.shield, 36f * u, core, style = Stroke(1.5f * u, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f * u, 5f * u))))
+        draw.drawCircle(Kk.Bone, 13f * u, core)
+        // Singularity with its polarity arc.
+        val singularity = at(250f, 130f)
+        draw.drawCircle(palette.threat, 12f * u, singularity, style = Stroke(3f * u))
+        draw.drawCircle(Kk.Bone, 3f * u, singularity)
+        arc(singularity, 22f, 0f, 260f, palette.pol, 2.5f)
+        particles(palette.you)
+        if (preferences.damageNumbers) damageNumbers(palette)
+    }
+
+    /**
+     * Hostile bullet: a solid threat dot; Mono (where threat and you share white) draws a ring
+     * with the threat hatch inside, so it never reads as a you particle.
+     */
+    fun bullet(center: Offset, palette: KkRolePalette) {
+        if (!palette.hatchThreats) {
+            draw.drawCircle(palette.threat, 4.5f * u, center)
+            return
+        }
+        val r = 6f * u
+        val path = scratch.apply {
+            rewind()
+            addOval(Rect(center.x - r, center.y - r, center.x + r, center.y + r))
+        }
+        draw.drawKkThreatHatch(path, palette)
+        draw.drawCircle(palette.threat, r, center, style = Stroke(1.5f * u))
+    }
+
+    /** Rising sparks show the selected particle density. */
+    fun particles(color: Color) {
+        val count = when (preferences.particleDensity) {
+            ParticleDensity.LOW -> 3
+            ParticleDensity.NORMAL -> 7
+            ParticleDensity.HIGH -> 12
+        }
+        for (index in 0 until count) {
+            val baseX = 20f + (index * 53) % 300
+            val baseY = 200f + (index * 29) % 80
+            val period = 1.2f + (index % 3) * 0.3f
+            val spent = kkLoop(time, period, delay = -index * 0.37f)
+            val center = at(baseX, baseY - 70f * KkEase.Out.transform(spent))
+            draw.drawCircle(color, (4f - spent * 3f) * u, center, alpha = 1f - spent)
+        }
+    }
+
+    /** Damage samples reflect the selected size, formatting and color thresholds. */
+    fun damageNumbers(palette: KkRolePalette) {
+        val threshold = preferences.damageNumberTierThreshold.coerceIn(
+            DAMAGE_NUMBER_TIER_THRESHOLD_OPTIONS.first(), DAMAGE_NUMBER_TIER_THRESHOLD_OPTIONS.last(),
+        ).toLong()
+        val samples = listOf(
+            DamageSample(max(1L, threshold / 2L), 16f, 30f, 150f, 1f, 0f),
+            DamageSample(threshold * 2L, 176f, 30f, 144f, 1.2f, 0.6f),
+            DamageSample(threshold * DAMAGE_NUMBER_POWERFUL_MULTIPLIER * 2L, 196f, 184f, 124f, 1.45f, 1.2f),
+            DamageSample(threshold * DAMAGE_NUMBER_DEVASTATING_MULTIPLIER * 2L, 16f, 262f, 190f, 1.8f, 1.8f),
+        )
+        for (sample in samples) {
+            val phase = kkLoop(time, NUMBER_LOOP, delay = sample.delay)
+            val rise = KkEase.Out.transform(min(1f, phase * NUMBER_LOOP / NUMBER_DRIFT)) * 10f
+            val label = formatDamageNumber(sample.amount, preferences.damageNumberFormat, language)
+            val size = 18f * preferences.damageNumberSize.scale * sample.tierScale
+            val lane = sample.lane * u
+            val color = settingsDamageColor(sample.amount, threshold.toInt(), palette)
+            val initial = measureKkText(text, label, measurers.typography.monoStyle(size))
+            val layout = if (initial.size.width <= lane) initial else {
+                measureKkText(text, label, measurers.typography.monoStyle(size * lane / initial.size.width))
+            }
+            draw.drawKkText(layout, x(sample.x), y(sample.y - rise), color, valign = KkVAlign.CENTER)
+        }
+    }
+
+    /** Interface: the text size on a real sentence, and the run statistics panel on its side. */
+    fun interfaceSample() {
+        val roles = measurers.roles
+        val sampleBox = rect(0f, 0f, PREVIEW_UNITS, 110f)
+        panel(sampleBox)
+        // The text size on game words and numbers (never the (!) explanation itself).
+        val textScale = preferences.textScale / SETTINGS_TEXT_BASELINE
+        val sized = measurers.at(u / draw.density * textScale)
+        val labelStyle = measurers.typography.bodyStyle(18f, lineHeightEm = 1.2f)
+        val valueStyle = measurers.typography.condStyle(24f, tabular = true, lineHeightEm = 1f)
+        draw.clipRect(sampleBox.left, sampleBox.top, sampleBox.right, sampleBox.bottom) {
+            settingsTextSizeSample(language).forEachIndexed { line, (label, value) ->
+                val centerY = sampleBox.top + (30f + 50f * line) * u
+                val valueLayout = measureKkText(sized, value, valueStyle)
+                val valueLeft = sampleBox.right - 12f * u - valueLayout.size.width
+                val labelLayout = measureKkText(sized, label, labelStyle, maxWidth = valueLeft - sampleBox.left - 24f * u)
+                drawKkText(labelLayout, sampleBox.left + 12f * u, centerY, Kk.Bone, valign = KkVAlign.CENTER)
+                drawKkText(valueLayout, sampleBox.right - 12f * u, centerY, roles.you, align = KkAlign.END, valign = KkVAlign.CENTER)
+            }
+        }
+        val statsWidth = 120f
+        val rowTop = 122f
+        val statsLeft = if (preferences.runStatisticsOnLeft) 0f else PREVIEW_UNITS - statsWidth
+        val mainLeft = if (preferences.runStatisticsOnLeft) statsWidth + 8f else 0f
+        val main = rect(mainLeft, rowTop, mainLeft + PREVIEW_UNITS - statsWidth - 8f, rowTop + 110f)
+        panel(main)
+        bar(mainLeft + 12f, rowTop + 12f, (main.width / u - 24f) * 0.7f, 12f, Kk.Bone)
+        bar(mainLeft + 12f, rowTop + 32f, (main.width / u - 24f) * 0.55f, 10f, Kk.Ink4)
+        bar(mainLeft + 12f, rowTop + 50f, (main.width / u - 24f) * 0.6f, 10f, Kk.Ink4)
+        val stats = rect(statsLeft, rowTop, statsLeft + statsWidth, rowTop + 110f)
+        panel(stats, roles.you)
+        bar(statsLeft + 12f, rowTop + 12f, statsWidth - 24f, 8f, roles.you)
+        bar(statsLeft + 12f, rowTop + 26f, (statsWidth - 24f) * 0.7f, 8f, Kk.Ink4)
+        bar(statsLeft + 12f, rowTop + 40f, (statsWidth - 24f) * 0.8f, 8f, Kk.Ink4)
+        bar(statsLeft + 12f, rowTop + 54f, (statsWidth - 24f) * 0.6f, 8f, Kk.Ink4)
+    }
+
+    /**
+     * Display: (a) the window in the stored mode inside a dashed screen outline (title strip when
+     * windowed, filling the outline when borderless, cut corners in fullscreen) with its size;
+     * (b) a cadence strip whose dot moves at the chosen frame limit; (c) a Play button at the
+     * applied interface scale.
+     */
+    fun display(platform: SettingsPlatform) {
+        val roles = measurers.roles
+        // Without window modes (phones, browsers) the window sample means nothing: cadence and scale only.
+        val stripTop = if (platform.support.windowModes) {
+            window(platform)
+            DISPLAY_SCREEN_HEIGHT + 32f
+        } else 0f
+        // (b) Cadence: the dot crosses 240 units in 1.2 s at positions quantized to the frame limit.
+        val strip = rect(48f, stripTop + DISPLAY_STRIP_HEIGHT * 0.5f - 1f, 288f, stripTop + DISPLAY_STRIP_HEIGHT * 0.5f + 1f)
+        draw.drawRect(Kk.Line, strip.topLeft, strip.size)
+        val cap = platform.shownFrameRateCap(preferences.frameRateCap)
+        val step = if (cap > 0) 1f / cap else 1f / 120f
+        for (ghost in 3 downTo 0) {
+            val sample = if (cap > 0) floor((time - ghost * step) * cap) / cap else time - ghost * step
+            val position = kkLoop(sample, 1.2f)
+            val alpha = if (ghost == 0) 1f else 0.45f / ghost
+            draw.drawCircle(roles.you, 5f * u, at(48f + 240f * position, stripTop + DISPLAY_STRIP_HEIGHT * 0.5f), alpha = alpha)
+        }
+        // (c) Play at the applied interface scale, relative to the scale the screen is drawn at.
+        val scale = platform.appliedInterfaceScale(preferences.interfaceScalePercent) / 100f / platform.screenScale
+        val buttonTop = stripTop + DISPLAY_STRIP_HEIGHT + 16f
+        val factor = u / draw.density * scale
+        val measurer = measurers.at(1f)
+        val label = language.text(SettingsRedesignText.PreviewPlay)
+        val width = kkButtonWidth(measurer, label, KkButtonSize.MD, draw.density)
+        val height = KkButtonSize.MD.heightDp * draw.density
+        val center = at(PREVIEW_UNITS * 0.5f, buttonTop + DISPLAY_BUTTON_HEIGHT * scale * 0.5f)
+        draw.withTransform({
+            translate(center.x, center.y)
+            scale(factor, factor, Offset.Zero)
+        }) {
+            drawKkButton(measurer, Rect(-width * 0.5f, -height * 0.5f, width * 0.5f, height * 0.5f), label, KkButtonVariant.PRIMARY, KkButtonSize.MD)
+        }
+    }
+
+    /** (a) The window in the stored mode inside a dashed screen outline, with its size or mode below. */
+    private fun window(platform: SettingsPlatform) {
+        val screen = rect(0f, 0f, PREVIEW_UNITS, DISPLAY_SCREEN_HEIGHT)
+        draw.drawRect(Kk.Ink1, screen.topLeft, screen.size)
+        val inset = 0.75f * u
+        draw.drawRect(
+            Kk.Line2, Offset(screen.left + inset, screen.top + inset), Size(screen.width - inset * 2f, screen.height - inset * 2f),
+            style = Stroke(1.5f * u, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f * u, 5f * u))),
+        )
+        val mode = preferences.windowMode
+        when (mode) {
+            WindowMode.WINDOWED -> {
+                val window = rect(48f, 20f, 288f, 170f)
+                draw.drawRect(Kk.Ink3, window.topLeft, window.size)
+                draw.drawRect(Kk.Bone, window.topLeft, Size(window.width, 14f * u))
+                draw.drawRect(Kk.Line, window.topLeft, window.size, style = kkStroke(u))
+            }
+            WindowMode.BORDERLESS -> {
+                val window = rect(4f, 4f, PREVIEW_UNITS - 4f, DISPLAY_SCREEN_HEIGHT - 4f)
+                draw.drawRect(Kk.Ink3, window.topLeft, window.size)
+            }
+            WindowMode.FULLSCREEN -> {
+                val window = rect(4f, 4f, PREVIEW_UNITS - 4f, DISPLAY_SCREEN_HEIGHT - 4f)
+                draw.drawKkSlab(window, Kk.Ink3, cut = 14f * u)
+            }
+        }
+        val size = platform.liveSizeOverride(preferences)?.let { settingsWindowSizeText(it.widthDp, it.heightDp, language) }
+            ?: settingsWindowSizeText(preferences.windowSize.widthDp, preferences.windowSize.heightDp, language)
+        val label = if (mode == WindowMode.WINDOWED) size else language.text(windowModeText(mode))
+        draw.drawKkText(
+            text, label, measurers.typography.monoStyle(12f), x(PREVIEW_UNITS * 0.5f), y(DISPLAY_SCREEN_HEIGHT + 16f), Kk.Mute,
+            align = KkAlign.CENTER, valign = KkVAlign.CENTER, uppercase = true,
+        )
+    }
+
+    /**
+     * Controls: six sheared keycaps (Dash, Brake, Active 1–3, Apex) with their keys; the capturing
+     * one pulses volt and the one that just took a swapped key shows the swap echo.
+     */
+    fun controls(frame: SettingsFrame) {
+        val roles = measurers.roles
+        val actions = PREVIEW_ACTIONS
+        actions.forEachIndexed { index, action ->
+            val centerX = 56f + 112f * (index % 3)
+            val top = (KEYCAP_HEIGHT + 30f) * (index / 3)
+            val cap = rect(centerX - KEYCAP_WIDTH * 0.5f, top, centerX + KEYCAP_WIDTH * 0.5f, top + KEYCAP_HEIGHT)
+            val capturing = frame.capture == action
+            val swapped = frame.swapped == action && time - frame.swappedAt in 0f..SETTINGS_SWAP_SECONDS
+            if (capturing || swapped) {
+                val echo = if (capturing) 4f * kkPulse(time, 1.2f) else 4f
+                draw.drawKkSheared(Rect(cap.left + echo * u, cap.top + echo * u, cap.right + echo * u, cap.bottom + echo * u), roles.you.copy(alpha = 0.55f))
+            }
+            draw.drawKkSheared(cap, if (capturing) roles.you else Kk.Ink3)
+            if (!capturing) {
+                val key = preferences.keyBindings.key(action).label(language)
+                fitted(key, measurers.typography.wideStyle(18f), (KEYCAP_WIDTH - 10f) * u) { layout ->
+                    draw.drawKkText(layout, cap.center.x, cap.center.y, Kk.Bone, align = KkAlign.CENTER, valign = KkVAlign.CENTER)
+                }
+            }
+            fitted(settingsActionName(action, language), measurers.typography.labelStyle(11f), 104f * u) { layout ->
+                draw.drawKkText(layout, cap.center.x, y(top + KEYCAP_HEIGHT + 14f), Kk.Mute, align = KkAlign.CENTER, valign = KkVAlign.CENTER)
+            }
+        }
+    }
+
+    /** Measures [label] at the preview scale, shrunk to [lane] px when wider, and hands it to [draw]. */
+    private inline fun fitted(label: String, style: TextStyle, lane: Float, block: (TextLayoutResult) -> Unit) {
+        val natural = measureKkText(text, label, style, uppercase = true)
+        block(if (natural.size.width <= lane) natural else measureKkText(measurers.at(text.scale * lane / natural.size.width), label, style, uppercase = true))
+    }
+
+    fun bar(l: Float, t: Float, width: Float, height: Float, color: Color) {
+        draw.drawRect(color, Offset(x(l), y(t)), Size(width * u, height * u))
+    }
+
+    fun singularity(center: Offset, radius: Float, dot: Float) {
+        val threat = measurers.roles.threat
+        draw.drawCircle(threat.copy(alpha = 0.12f), (radius + 6f) * u, center, style = Stroke(6f * u))
+        draw.drawCircle(threat, radius * u, center, style = Stroke(3f * u))
+        draw.drawCircle(Kk.Bone, dot * u, center)
+    }
+
+    /** `.core`: bone disc with an ink ring and a soft bone glow (stacked strokes, no blur). */
+    fun coreDisc(center: Offset, radius: Float) {
+        draw.drawCircle(Kk.Bone.copy(alpha = 0.08f), (radius + 10f) * u, center)
+        draw.drawCircle(Kk.Bone.copy(alpha = 0.12f), (radius + 5f) * u, center)
+        draw.drawCircle(Kk.Ink, (radius + 3f) * u, center)
+        draw.drawCircle(Kk.Bone, radius * u, center)
+    }
+
+    fun arc(center: Offset, radius: Float, startDegrees: Float, sweepDegrees: Float, color: Color, width: Float) {
+        val r = radius * u
+        draw.drawArc(
+            color, startDegrees, sweepDegrees, useCenter = false,
+            topLeft = Offset(center.x - r, center.y - r), size = Size(r * 2f, r * 2f),
+            style = Stroke(width * u, cap = StrokeCap.Butt),
+        )
+    }
+
+    fun polygon(points: FloatArray, fill: Color, palette: KkRolePalette) {
+        val path = scratch.apply {
+            rewind()
+            moveTo(x(points[0]), y(points[1]))
+            var index = 2
+            while (index < points.size) {
+                lineTo(x(points[index]), y(points[index + 1]))
+                index += 2
+            }
+            close()
+        }
+        draw.drawPath(path, fill)
+        draw.drawKkThreatHatch(path, palette)
+        draw.drawPath(path, palette.threat, style = Stroke(2f * u))
+    }
+
+    private val scratch: Path get() = PreviewPaths.scratch
+}
+
+/** Text size sample: two game terms with sample values (a stat readout, not an explanation). */
+internal fun settingsTextSizeSample(language: AppLanguage): List<Pair<String, String>> = listOf(
+    language.text(ProfileText.KineticMatter) to "2450",
+    language.text(ProfileText.CoreIntegrity) to "100",
+)
+
+/** The actions the Controls preview shows, in its 3 × 2 order. */
+private val PREVIEW_ACTIONS: List<GameAction> = listOf(
+    GameAction.DASH, GameAction.BRAKE, GameAction.APEX, GameAction.SKILL_1, GameAction.SKILL_2, GameAction.SKILL_3,
+)
+
+private class DamageSample(val amount: Long, val x: Float, val y: Float, val lane: Float, val tierScale: Float, val delay: Float)
+
+/** One reusable scratch path; the preview is drawn on the UI thread only. */
+private object PreviewPaths {
+    val scratch = Path()
+}

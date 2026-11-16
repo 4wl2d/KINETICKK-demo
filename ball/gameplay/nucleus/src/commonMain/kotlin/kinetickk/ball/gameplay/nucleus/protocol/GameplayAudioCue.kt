@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.nucleus.protocol
+
+/** Gameplay-owned semantic audio cue. Resource translation belongs to gameplay impl. */
+enum class GameplayAudioCue {
+    UI_CLICK,
+    DASH,
+    WEAPON_LIGHT,
+    WEAPON_HEAVY,
+    IMPACT,
+    ENEMY_DESTROYED,
+    PICKUP,
+    LEVEL_UP,
+    OVERHEAT,
+    RECOVERED,
+    HURT,
+    OVERDRIVE,
+    WEAPON_ACQUIRED,
+    GAME_OVER,
+    VICTORY,
+    SKILL,
+    APEX,
+    /** A spent structure leaves the world and shatters. */
+    STRUCTURE_COLLAPSE,
+    /** Core Freeze froze the Core solid (the run ends, or Easy mode's ice shatters). */
+    CORE_FROZEN,
+}

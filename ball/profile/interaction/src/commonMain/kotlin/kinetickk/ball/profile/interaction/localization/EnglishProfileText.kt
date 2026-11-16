@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.profile.interaction.localization
+
+internal object EnglishProfileText {
+    operator fun get(key: ProfileText): String = when (key) {
+        ProfileText.SettingsInterface -> "Interface"
+        ProfileText.SettingsDisplay -> "Display"
+        ProfileText.SettingsControls -> "Controls"
+        ProfileText.RunStatisticsSide -> "Run statistics side"
+        ProfileText.LeftSide -> "Left"
+        ProfileText.RightSide -> "Right"
+        ProfileText.PreviousPage -> "Previous page"
+        ProfileText.NextPage -> "Next page"
+        ProfileText.SettingsTitle -> "Settings"
+        ProfileText.SettingsGame -> "Game"
+        ProfileText.SettingsSound -> "Sound"
+        ProfileText.VolumePercent -> "Volume in percent, 0–100"
+        ProfileText.SettingsGraphics -> "Graphics"
+        ProfileText.Language -> "Language"
+        ProfileText.Sfx -> "Sfx"
+        ProfileText.Music -> "Music"
+        ProfileText.MasterVolume -> "Master volume"
+        ProfileText.SimulationSpeed -> "Simulation speed"
+        ProfileText.TextSize -> "Text size"
+        ProfileText.ScreenShake -> "Screen shake"
+        ProfileText.Particles -> "Particles"
+        ProfileText.DamageNumbers -> "Damage numbers"
+        ProfileText.DamageNumberSize -> "Damage number size"
+        ProfileText.DamageNumberFormat -> "Damage number format"
+        ProfileText.DamageColorTiers -> "Damage color tiers"
+        ProfileText.On -> "On"
+        ProfileText.Off -> "Off"
+        ProfileText.Low -> "Low"
+        ProfileText.Normal -> "Normal"
+        ProfileText.High -> "High"
+        ProfileText.Small -> "Small"
+        ProfileText.Large -> "Large"
+        ProfileText.Huge -> "Huge"
+        ProfileText.Compact -> "Compact"
+        ProfileText.Full -> "Full"
+        ProfileText.MaximumSynchrony -> "Max"
+        ProfileText.CoreIntegrity -> "Core integrity"
+        ProfileText.KineticMatter -> "Kinetic matter"
+    }
+}

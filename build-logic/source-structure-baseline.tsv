@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+# SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+# Ceilings for verifySourceStructure (docs/project/ARCHITECTURE.md). Lower only: ./gradlew updateSourceStructureBaseline
+schema	kinetickk-source-structure-baseline/v1
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/canvas/hud/HudBossBar.kt#drawBossBar	103
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/canvas/hud/HudMinimapRenderer.kt#drawMinimap	105
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/canvas/world/WorldHudKeepOut.kt#update	102
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/canvas/world/enemies/EnemyRenderer.kt#drawEnemy	114
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/canvas/world/places/SiteRenderer.kt#drawActivePoint	101
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/layout/ChoiceLayoutGeometry.kt#choiceLayoutGeometry	107
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/layout/GameplayLayoutGeometry.kt#forEachRunningControlBounds	120
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/overlay/PauseBuildLayouts.kt#drawCompactBuild	117
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/overlay/ReportSummary.kt#ReportSummary	115
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/rewards/RewardCard.kt#RewardCard	124
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/rewards/RewardCardStyles.kt#buildRewardCardLook	111
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/rewards/RewardChips.kt#RewardChipFlow	111
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/rewards/RewardChips.kt#drawRewardChip	108
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/rewards/RewardPreviewRows.kt#rewardRelicPreview	135
+function-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/rewards/RewardTotem.kt#TotemRow	113
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/ProfilePanel.kt#ProfileHeader	111
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/settings/impl/DefaultSettingsFeature.kt#Content	116
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/settings/impl/SettingsLayout.kt#build	165
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/workshop/armory/ArmoryBody.kt#ArmoryBody	200
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/workshop/armory/ArmorySheet.kt#armorySheet	126
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/workshop/armory/ArmoryTile.kt#drawArmoryTile	119
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/workshop/hangar/HangarLayout.kt#hangarLayout	111
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/workshop/hangar/HangarRenderer.kt#HangarBody	113
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/workshop/matrix/MatrixLayout.kt#matrixLayout	108
+function-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/workshop/matrix/MatrixRenderer.kt#MatrixBody	112
+function-lines	flow/session/interaction/src/commonMain/kotlin/kinetickk/flow/session/interaction/codex/impl/CodexScreen.kt#CodexContent	181
+function-lines	foundation/design/src/commonMain/kotlin/kinetickk/foundation/design/KkCards.kt#drawSkillSlotBody	113
+main-file-lines	ball/gameplay/interaction/src/commonMain/kotlin/kinetickk/ball/gameplay/interaction/canvas/world/places/SiteRenderer.kt	730
+main-file-lines	ball/profile/interaction/src/commonMain/kotlin/kinetickk/ball/profile/interaction/settings/impl/SettingsLayout.kt	646
+main-file-lines	flow/session/interaction/src/commonMain/kotlin/kinetickk/flow/session/interaction/codex/impl/CodexDetailViews.kt	671
+main-file-lines	flow/session/interaction/src/commonMain/kotlin/kinetickk/flow/session/interaction/codex/impl/CodexViews.kt	619
+main-file-lines	flow/session/interaction/src/commonMain/kotlin/kinetickk/flow/session/interaction/codex/impl/CodexVisuals.kt	605
+main-file-lines	foundation/design/src/commonMain/kotlin/kinetickk/foundation/design/KkControls.kt	626
+main-file-lines	foundation/design/src/commonMain/kotlin/kinetickk/foundation/design/KkText.kt	691
+package-cycles	:ball:gameplay:interaction	6
+package-files	ball/content/api/src/commonMain/kotlin/kinetickk/ball/content/api	55
+package-files	foundation/design/src/commonMain/kotlin/kinetickk/foundation/design	37

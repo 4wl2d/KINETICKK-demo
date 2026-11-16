@@ -1,0 +1,150 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.interaction.canvas
+
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import kinetickk.ball.content.api.SiteKind
+import kinetickk.ball.content.api.localizedContent
+import kinetickk.ball.gameplay.interaction.localization.WorldRedesignText
+import kinetickk.foundation.common.localization.AppLanguage
+import kinetickk.foundation.common.localization.text
+
+/** Kill shard outline (x, y pairs around the origin): a parallelogram, symmetric about its center. */
+internal val ShardOutline = floatArrayOf(-0.5f, -0.21f, 0.3f, -0.21f, 0.5f, 0.21f, -0.3f, 0.21f)
+
+/** Unit shapes for fills that scale freely under a transform (no stroke to distort). */
+internal object WorldUnitShapes {
+    /**
+     * A kill shard: a sheared quad sliver about one unit long with blunt, parallel ends. It is
+     * point-symmetric ([ShardOutline]), so no rotation makes it read as an arrowhead.
+     */
+    val shard: Path by lazy {
+        Path().apply {
+            moveTo(ShardOutline[0], ShardOutline[1])
+            var index = 2
+            while (index < ShardOutline.size) {
+                lineTo(ShardOutline[index], ShardOutline[index + 1])
+                index += 2
+            }
+            close()
+        }
+    }
+
+    /**
+     * A Comet's streak on a unit length: 0.9 wide at its body (x = 0) tapering to a blunt 0.12-wide tip at x = 1, drawn
+     * scaled by the tail's length along x and the Comet's radius across. The flat tip keeps it a streak, never an arrowhead.
+     */
+    val cometTail: Path by lazy {
+        Path().apply {
+            moveTo(0f, -0.45f)
+            lineTo(1f, -0.06f)
+            lineTo(1f, 0.06f)
+            lineTo(0f, 0.45f)
+            close()
+        }
+    }
+
+    /** The streak's brighter core: the first 55 % of the tail, 0.6 wide at the body, tapering the same way. */
+    val cometTailCore: Path by lazy {
+        Path().apply {
+            moveTo(0f, -0.3f)
+            lineTo(0.55f, -0.06f)
+            lineTo(0.55f, 0.06f)
+            lineTo(0f, 0.3f)
+            close()
+        }
+    }
+}
+
+/**
+ * The three cracks of a Brittle enemy as polyline segments (x0, y0, x1, y1) on a unit radius:
+ * drawn as plain lines scaled by the enemy's radius, so no path or stroke varies per size.
+ */
+internal val BrittleCracks = floatArrayOf(
+    -0.62f, -0.34f, -0.18f, -0.06f,
+    -0.18f, -0.06f, 0.04f, -0.46f,
+    -0.18f, -0.06f, 0.2f, 0.26f,
+    0.2f, 0.26f, 0.62f, 0.12f,
+    0.2f, 0.26f, 0.06f, 0.6f,
+)
+
+/** Cached strokes, including dashed ones (path effects are native-backed: created on first use). */
+internal object WorldStrokes {
+    val dashedHair: Stroke by lazy { Stroke(1f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))) }
+    val dashedThin: Stroke by lazy { Stroke(1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(7f, 5f))) }
+    val dashedMedium: Stroke by lazy { Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 7f))) }
+    /** 6 px progress arcs (the collapsing orbit's ring). */
+    val arc6: Stroke by lazy { Stroke(6f, cap = StrokeCap.Butt) }
+    val dashEffect: PathEffect by lazy { PathEffect.dashPathEffect(floatArrayOf(8f, 7f)) }
+}
+
+/** Strings for per-frame numbers, created once per value and language. */
+internal object WorldStrings {
+    private val timers = arrayOfNulls<String>(600)
+    private val distanceSuffixes = arrayOfNulls<String>(AppLanguage.entries.size)
+    private val crit = arrayOfNulls<String>(AppLanguage.entries.size)
+    private val secondsSuffixes = arrayOfNulls<String>(AppLanguage.entries.size)
+    private val pointNameSources = arrayOfNulls<String>(SiteKind.entries.size * AppLanguage.entries.size)
+    private val pointNames = arrayOfNulls<String>(SiteKind.entries.size * AppLanguage.entries.size)
+    /** One slot per reaction (declared before the arrays it sizes). */
+    private val REACTION_SLOTS = kinetickk.ball.content.api.ReactionId.entries.size
+    private val reactionSources = arrayOfNulls<String>(REACTION_SLOTS * AppLanguage.entries.size)
+    private val reactionNames = arrayOfNulls<String>(REACTION_SLOTS * AppLanguage.entries.size)
+
+    /** Remaining time as `m:ss` (mono readout, no unit). */
+    fun timer(seconds: Float): String {
+        val whole = kotlin.math.ceil(seconds.coerceAtLeast(0f)).toInt()
+        if (whole >= timers.size) return format(whole)
+        return timers[whole] ?: format(whole).also { timers[whole] = it }
+    }
+
+    /** The constant unit after an edge-marker distance, display-cased once per language. */
+    fun distanceSuffix(language: AppLanguage): String =
+        distanceSuffixes[language.ordinal] ?: language.text(WorldRedesignText.Distance, "").uppercase()
+            .also { distanceSuffixes[language.ordinal] = it }
+
+    fun crit(language: AppLanguage): String =
+        crit[language.ordinal] ?: language.text(WorldRedesignText.CriticalHit).also { crit[language.ordinal] = it }
+
+    /** The constant unit after the orbit's seconds in the ring, display-cased once per language. */
+    fun secondsSuffix(language: AppLanguage): String =
+        secondsSuffixes[language.ordinal] ?: language.text(WorldRedesignText.OrbitSeconds, "").uppercase()
+            .also { secondsSuffixes[language.ordinal] = it }
+
+    /** The decimal separator before tenths. */
+    fun decimalSeparator(language: AppLanguage): String = if (language == AppLanguage.Russian) "," else "."
+
+    /** A point's content [name] in [language], resolved once per kind, language and name. */
+    fun pointName(kind: SiteKind, name: String, language: AppLanguage): String {
+        val slot = kind.ordinal * AppLanguage.entries.size + language.ordinal
+        val cached = pointNames[slot]
+        if (cached != null && pointNameSources[slot] == name) return cached
+        return name.localizedContent(language).also {
+            pointNameSources[slot] = name
+            pointNames[slot] = it
+        }
+    }
+
+    /** A reaction's content [name] in [language], resolved once per reaction, language and name. */
+    fun reactionName(name: String, reaction: Int, language: AppLanguage): String {
+        if (reaction !in 0 until REACTION_SLOTS) return name.localizedContent(language)
+        val slot = reaction * AppLanguage.entries.size + language.ordinal
+        val cached = reactionNames[slot]
+        if (cached != null && reactionSources[slot] == name) return cached
+        return name.localizedContent(language).also {
+            reactionSources[slot] = name
+            reactionNames[slot] = it
+        }
+    }
+
+    private fun format(seconds: Int): String {
+        val remainder = seconds % 60
+        return "${seconds / 60}:${if (remainder < 10) "0" else ""}$remainder"
+    }
+}

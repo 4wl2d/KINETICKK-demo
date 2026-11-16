@@ -1,0 +1,200 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.content.api
+
+import kinetickk.foundation.collections.ImmutableList
+import kinetickk.foundation.collections.immutableListOf
+
+/**
+ * The field a Relic draws on. Elemental aspects follow [StatusElement] order; presentation colors map by ordinal.
+ */
+enum class RelicAspect(val displayLabel: String, val element: StatusElement?) {
+    KINETIC("Kinetic", null),
+    THERMAL("Thermal", StatusElement.THERMAL),
+    CRYO("Cryo", StatusElement.CRYO),
+    ION("Ion", StatusElement.ION),
+    GRAVITIC("Gravitic", StatusElement.GRAVITIC),
+    ENTROPY("Entropy", StatusElement.ENTROPY),
+}
+
+/**
+ * Public resonance keys. Players predict Relic interactions from them: a shared key harmonizes and an
+ * opposed pair of keys interferes. Named pairings refine specific combinations.
+ */
+enum class RelicKey(val displayLabel: String) {
+    MOTION("Motion"),
+    STILLNESS("Stillness"),
+    HEAT("Heat"),
+    COLD("Cold"),
+    CHARGE("Charge"),
+    GRAVITY("Gravity"),
+    DECAY("Decay"),
+    LIFE("Life"),
+    FRAGILE("Fragile"),
+    ECHO("Echo"),
+    CRITICAL("Critical");
+
+    companion object {
+        private val Opposed: Set<Pair<RelicKey, RelicKey>> = setOf(
+            HEAT to COLD,
+            MOTION to STILLNESS,
+            LIFE to FRAGILE,
+        )
+
+        fun opposed(a: RelicKey, b: RelicKey): Boolean = (a to b) in Opposed || (b to a) in Opposed
+    }
+}
+
+enum class RelicId {
+    PERPETUAL_VECTOR,
+    GYRE_ENGINE,
+    GLASS_COMET,
+    ECHO_CHAMBER,
+    FURNACE_COVENANT,
+    ABSOLUTE_ZERO,
+    STORMHEART_CAPACITOR,
+    AEGIS_INVERSION,
+    NEUTRON_HEART,
+    VERDANT_ROT,
+}
+
+/**
+ * A numeric Relic parameter: [base] at rank 1 plus [perRank] for every rank above it. Upside text
+ * references values positionally as `{0}`, `{1}`, … so balance never edits prose. A [powerUnits] value is an
+ * integrity or damage amount: a run's text shows it at the run's number scale.
+ */
+data class RelicValue(val base: Float, val perRank: Float = 0f, val powerUnits: Boolean = false) {
+    init {
+        require(base.isFinite() && perRank.isFinite())
+    }
+
+    fun at(rank: Int): Float = base + perRank * (rank - 1).coerceAtLeast(0)
+}
+
+data class RelicDefinition(
+    val id: RelicId,
+    val name: String,
+    val aspect: RelicAspect,
+    val keys: ImmutableList<RelicKey>,
+    val attunedTags: ImmutableList<BuildTag>,
+    /** The rule rewrite. May reference [values] as `{n}`. */
+    val upside: String,
+    /** The mandatory cost. Never scales with rank. */
+    val liability: String,
+    val values: ImmutableList<RelicValue> = immutableListOf(),
+) {
+    init {
+        require(name.isNotBlank()) { "Relic name must not be blank" }
+        require(upside.isNotBlank()) { "Relic upside must not be blank" }
+        require(liability.isNotBlank()) { "Every Relic must carry a liability" }
+        require(keys.size in 1..2 && keys.toSet().size == keys.size) { "Relics carry one or two distinct keys" }
+        require(attunedTags.size <= 2 && attunedTags.toSet().size == attunedTags.size)
+        require(values.size <= ContentBounds.MAX_RELIC_VALUES)
+    }
+
+    fun value(index: Int, rank: Int): Float = values[index].at(rank)
+
+    /** True when the two Relics share a key; named pairings take precedence. */
+    fun harmonizes(other: RelicDefinition): Boolean =
+        keys.any { it in other.keys } && !dissonates(other)
+
+    fun dissonates(other: RelicDefinition): Boolean =
+        keys.any { mine -> other.keys.any { theirs -> RelicKey.opposed(mine, theirs) } }
+}
+
+enum class RelicPairingKind { CONCORD, DISCORD }
+
+enum class RelicPairingId {
+    ENDLESS_GYRE,
+    LIGHTNING_ROD,
+    ROT_WARD,
+    FARADAY_CAGE,
+    THERMAL_PARADOX,
+    SHATTERED_AEGIS,
+}
+
+/** A named relic-to-relic interaction: amplification (concord) or interference (discord). */
+data class RelicPairingDefinition(
+    val id: RelicPairingId,
+    val first: RelicId,
+    val second: RelicId,
+    val kind: RelicPairingKind,
+    val name: String,
+    val description: String,
+) {
+    init {
+        require(first != second) { "A pairing joins two different Relics" }
+        require(name.isNotBlank() && description.isNotBlank())
+    }
+
+    fun joins(a: RelicId, b: RelicId): Boolean = (first == a && second == b) || (first == b && second == a)
+
+    fun involves(relic: RelicId): Boolean = first == relic || second == relic
+}
+
+data class EquippedRelic(
+    val id: RelicId,
+    val rank: Int,
+) {
+    init {
+        require(rank > 0) { "Relic rank must be positive" }
+    }
+}
+
+data class RelicPolicy(
+    val maxSlots: Int,
+    val maxRank: Int,
+    /**
+     * Matter a Relic opportunity pays when it cannot be one: a resonance that cannot rank any further, an offer with no
+     * open slot, or a Relic drop the run's budget or schedule holds back.
+     */
+    val salvageMatter: Int = 8,
+    /**
+     * Relic opportunities one run may claim: every Relic offer is one, and its card (a bind, the
+     * rank-up of a duplicate or a Meld) consumes it. Rerolls redraw the open offer and never add one.
+     */
+    val acquisitionsPerRun: Int = 4,
+    /** The run second at which an Elite-class kill may first drop a Relic; opt-in sources may claim earlier. */
+    val firstUnlockSeconds: Float = 30f,
+    /** Seconds between the unlocks of the later Elite-drop opportunities (30, 195, 360, 525 s by default). */
+    val unlockIntervalSeconds: Float = 165f,
+    /** Each Meld multiplies all damage dealt by 1 + this share. */
+    val meldDamage: Float = 0.05f,
+    /** Each Meld raises maximum integrity by this share of its current value and heals the gain. */
+    val meldIntegrity: Float = 0.03f,
+) {
+    init {
+        require(maxSlots > 0) { "Relic maxSlots must be positive" }
+        require(maxRank > 0) { "Relic maxRank must be positive" }
+        require(salvageMatter >= 0) { "Relic salvage must not be negative" }
+        require(acquisitionsPerRun in 0..ContentBounds.MAX_RELICS) { "Relic acquisitions per run must be in 0..${ContentBounds.MAX_RELICS}" }
+        require(firstUnlockSeconds.isFinite() && firstUnlockSeconds >= 0f && unlockIntervalSeconds.isFinite() && unlockIntervalSeconds > 0f) {
+            "Relic unlock times must be finite, the interval positive"
+        }
+        require(meldDamage.isFinite() && meldDamage in 0f..1f && meldIntegrity.isFinite() && meldIntegrity in 0f..1f) {
+            "Meld bonuses must be shares in 0..1"
+        }
+    }
+
+    fun acceptsRank(rank: Int): Boolean = rank in 1..maxRank
+
+    /** Relic opportunities an Elite-class kill may have unlocked by [elapsedSeconds]: one at each unlock, up to the budget. */
+    fun unlockedOpportunities(elapsedSeconds: Float): Int {
+        if (elapsedSeconds < firstUnlockSeconds) return 0
+        val unlocked = 1 + ((elapsedSeconds - firstUnlockSeconds) / unlockIntervalSeconds).toInt()
+        return unlocked.coerceAtMost(acquisitionsPerRun)
+    }
+
+    /** The damage multiplier of [melds] Melds: each multiplies by 1 + [meldDamage]. */
+    fun meldDamageMultiplier(melds: Int): Float = meldMultiplier(meldDamage, melds)
+
+    /** The maximum-integrity multiplier of [melds] Melds: each raises the then current maximum by [meldIntegrity]. */
+    fun meldIntegrityMultiplier(melds: Int): Float = meldMultiplier(meldIntegrity, melds)
+
+    private fun meldMultiplier(share: Float, melds: Int): Float {
+        var multiplier = 1f
+        repeat(melds.coerceAtLeast(0)) { multiplier *= 1f + share }
+        return multiplier
+    }
+}

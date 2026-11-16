@@ -1,0 +1,513 @@
+// SPDX-FileCopyrightText: 2026 Vladislav Tomilov
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
+package kinetickk.ball.gameplay.interaction.rewards
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.unit.dp
+import kinetickk.ball.content.api.RelicPolicy
+import kinetickk.ball.content.api.localizedContent
+import kinetickk.ball.gameplay.interaction.canvas.look.drawRelicIcon
+import kinetickk.ball.gameplay.interaction.canvas.look.overlayColor
+import kinetickk.ball.gameplay.interaction.canvas.look.overlayIcon
+import kinetickk.foundation.design.CanvasTextMeasurer
+import kinetickk.foundation.design.Kk
+import kinetickk.foundation.design.KkAlign
+import kinetickk.foundation.design.KkIcon
+import kinetickk.foundation.design.KkPathCache
+import kinetickk.foundation.design.KkRolePalette
+import kinetickk.foundation.design.KkVAlign
+import kinetickk.foundation.design.LocalAppLanguage
+import kinetickk.foundation.design.LocalKkRolePalette
+import kinetickk.foundation.design.drawKkHatch
+import kinetickk.foundation.design.drawKkIcon
+import kinetickk.foundation.design.drawKkPips
+import kinetickk.foundation.design.drawKkText
+import kinetickk.foundation.design.drawKkThreatHatch
+import kinetickk.foundation.design.kkBoxHeight
+import kinetickk.foundation.design.kkKeyCapStyle
+import kinetickk.foundation.design.kkStroke
+import kinetickk.foundation.design.labelStyle
+import kinetickk.foundation.design.measureKkText
+import kinetickk.foundation.design.rememberKkCanvasMeasurer
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kinetickk.ball.gameplay.interaction.canvas.look.*
+
+// Reward card chips: identity marks beside the icon (an active's slot and lane, Risk, Surged, tags) and the forecast
+// row of what a card changes in the build. Glyphs carry identity, hues only element and role.
+
+/** Chip metrics in dp and board sp (before the text setting). */
+internal class RewardChipStyle(val heightDp: Float, val fontSize: Float)
+
+internal val RewardChipRegular = RewardChipStyle(22f, 12f)
+internal val RewardChipCompact = RewardChipStyle(18f, 10.5f)
+
+private fun chipLabelStyle(measurer: CanvasTextMeasurer, style: RewardChipStyle) =
+    measurer.typography.labelStyle(style.fontSize, trackingEm = 0.08f)
+
+/**
+ * Glyphs before the label: a tag or element mark, both elements of a reaction, the suppression
+ * lock and the rune of the relic that voids the card, an attuned tag's aspect diamond and tag mark.
+ */
+private fun RewardChip.glyphCount(): Int = when (kind) {
+    RewardChipKind.TAG, RewardChipKind.TAG_TIER -> if (tag != null) 1 else 0
+    RewardChipKind.ATTUNED -> if (tag != null) 2 else 1
+    RewardChipKind.REACTION -> elements.size.coerceAtMost(2)
+    RewardChipKind.AFFINITY, RewardChipKind.ELEMENT -> elements.size.coerceAtMost(1)
+    RewardChipKind.SIGNATURE -> if (core != null) 1 else 0
+    RewardChipKind.SUPPRESSED -> if (rune != null) 2 else 1
+    RewardChipKind.PATTERN, RewardChipKind.COST, RewardChipKind.MUTATOR -> if (icon != null) 1 else 0
+    RewardChipKind.KEYNOTE -> (if (tag != null) 1 else 0) + elements.size.coerceAtMost(1)
+    else -> 0
+}
+
+/** Tier pips after a TAG_TIER label. */
+private fun RewardChip.trailingMarks(): Int = when (kind) {
+    RewardChipKind.TAG_TIER -> pips.coerceIn(0, 5)
+    else -> 0
+}
+
+private fun chipPad(height: Float) = height * 0.36f
+private fun chipGlyph(height: Float) = height * 0.64f
+private fun chipGap(height: Float) = height * 0.22f
+private fun pipWidth(height: Float) = height * 0.3f
+
+/**
+ * Extra room after the label: the plate's right edge slants in toward its bottom (by [chipCut]), and a large label's
+ * last letter reaches low enough to meet it.
+ */
+private fun chipSlantRoom(height: Float) = height * 0.12f
+
+/** The plate's slant: its top edge starts this far in from the left, its bottom edge ends this far in from the right. */
+private fun chipCut(height: Float) = height * 0.27f
+
+/**
+ * Width in px of [chip] at [style]; with [lines] 2, of its label broken at its middle space ([chipLabelLines]) into two
+ * lines (a first chip too wide for its row, [RewardChipFlow]).
+ */
+internal fun rewardChipWidth(measurer: CanvasTextMeasurer, chip: RewardChip, style: RewardChipStyle, density: Float, lines: Int = 1): Float {
+    val height = style.heightDp * density
+    val labelWidth = if (lines == 2) chipLabelLines(chip.label).maxOf { line ->
+        measureKkText(measurer, line, chipLabelStyle(measurer, style), uppercase = true).size.width
+    } else measureKkText(measurer, chip.label, chipLabelStyle(measurer, style), uppercase = true).size.width
+    val glyphs = chip.glyphCount()
+    var width = chipPad(height) * 2f + chipSlantRoom(height) + labelWidth
+    if (glyphs > 0) width += glyphs * chipGlyph(height) + (glyphs - 1) * height * 0.04f + chipGap(height)
+    val marks = chip.trailingMarks()
+    if (marks > 0) width += chipGap(height) + marks * pipWidth(height) + (marks - 1) * height * 0.12f
+    chip.keyCap?.let { key -> width += chipGap(height) + keyCapWidth(measureKeyCap(measurer, key, style), height) - chipPad(height) * 0.5f }
+    return width
+}
+
+/** [label] broken at the space nearest its middle into two lines; one line when it has no space. */
+internal fun chipLabelLines(label: String): List<String> {
+    val middle = label.length / 2
+    val split = label.indices.filter { label[it] == ' ' }.minByOrNull { kotlin.math.abs(it - middle) } ?: return listOf(label)
+    return listOf(label.substring(0, split), label.substring(split + 1))
+}
+
+/** Whether [chip] may break its label into two lines when it is too wide for its row: a label with a space and no marks after it. */
+internal fun RewardChip.wraps(): Boolean = ' ' in label && trailingMarks() == 0 && keyCap == null
+
+/** An ACTIVE chip's key cap label: the HUD key cap's mono face at the chip's size. */
+private fun measureKeyCap(measurer: CanvasTextMeasurer, key: String, style: RewardChipStyle) =
+    measureKkText(measurer, key, kkKeyCapStyle(measurer, style.fontSize), uppercase = true)
+
+/** The key cap plate round its label: at least square, so a one-letter key reads as a key. */
+private fun keyCapWidth(label: androidx.compose.ui.text.TextLayoutResult, height: Float): Float =
+    max(label.size.width + keyCapPad(height) * 2f, keyCapHeight(height))
+
+private fun keyCapHeight(height: Float) = height * 0.74f
+private fun keyCapPad(height: Float) = height * 0.2f
+
+/** Faces and inks of a chip kind (under the color-vision preset [roles]). */
+private class ChipInk(val face: Color, val border: Color, val text: Color, val glyph: Color)
+
+private fun RewardChip.ink(roles: KkRolePalette): ChipInk = when (kind) {
+    RewardChipKind.TAG -> if (active) ChipInk(Kk.Ink3, Kk.Bone2.copy(alpha = 0.55f), Kk.Bone, Kk.Bone)
+        else ChipInk(Color.Transparent, Kk.Line2, Kk.Bone2, Kk.Mute)
+    RewardChipKind.ATTUNED -> {
+        // The relic's attunement, not the card's own tag: outlined in the aspect hue.
+        val hue = aspect?.overlayColor(roles) ?: Kk.Bone2
+        if (active) ChipInk(hue.copy(alpha = 0.16f), hue, Kk.Bone, Kk.Bone) else ChipInk(Color.Transparent, hue.copy(alpha = 0.55f), Kk.Bone2, Kk.Mute)
+    }
+    RewardChipKind.RISK -> ChipInk(roles.threat, Color.Transparent, Kk.Ink, Kk.Ink)
+    RewardChipKind.SURGED -> ChipInk(roles.you.copy(alpha = 0.14f), roles.you, roles.you, roles.you)
+    RewardChipKind.SUPPRESSED -> ChipInk(roles.threat.copy(alpha = 0.12f), roles.threat, roles.threat, roles.threat)
+    RewardChipKind.REACTION -> ChipInk(Kk.Ink3, if (discovered) Kk.Bone2.copy(alpha = 0.5f) else Kk.Line2, Kk.Bone, Kk.Bone)
+    RewardChipKind.TAG_TIER -> ChipInk(Kk.Ink3, roles.you.copy(alpha = 0.7f), Kk.Bone, Kk.Bone)
+    RewardChipKind.AFFINITY -> {
+        val hue = elements.firstOrNull()?.overlayColor(roles) ?: Kk.Bone
+        if (active) ChipInk(hue.copy(alpha = 0.2f), hue, Kk.Bone, hue) else ChipInk(Kk.Ink3, hue.copy(alpha = 0.55f), Kk.Bone2, hue)
+    }
+    RewardChipKind.CONCORD -> ChipInk(if (discovered) Kk.Bone else Kk.Ink3, if (discovered) Color.Transparent else Kk.Bone2,
+        if (discovered) Kk.Ink else Kk.Bone, Kk.Ink)
+    RewardChipKind.DISCORD -> ChipInk(roles.threat.copy(alpha = if (discovered) 0.22f else 0.1f), roles.threat, roles.threat, roles.threat)
+    RewardChipKind.HARMONY -> ChipInk(Kk.Ink3, Kk.Mute.copy(alpha = 0.6f), Kk.Bone2, Kk.Bone2)
+    RewardChipKind.DISSONANCE -> ChipInk(Kk.Ink3, roles.threat.copy(alpha = 0.6f), roles.threat, roles.threat)
+    // The run character's own weapon: a filled `you` plate with the character's form.
+    RewardChipKind.SIGNATURE -> ChipInk(roles.you, Color.Transparent, Kk.Ink, Kk.Ink)
+    // A weapon's element: outlined in its hue (Kinetic in the preset's volt).
+    RewardChipKind.ELEMENT -> {
+        val hue = elements.firstOrNull()?.overlayColor(roles) ?: roles.kinetic
+        ChipInk(hue.copy(alpha = 0.14f), hue, Kk.Bone, hue)
+    }
+    // The slot an active takes: outlined in `you` like the HUD slot's ready ring; its key cap is a bone plate.
+    RewardChipKind.ACTIVE -> ChipInk(Kk.Ink3, roles.you.copy(alpha = 0.7f), Kk.Bone, Kk.Bone)
+    // Taking it gives up a held active: outlined in the threat role, like a relic Replace.
+    RewardChipKind.REPLACES_ACTIVE -> ChipInk(Kk.Ink3, roles.threat.copy(alpha = 0.7f), roles.threat, roles.threat)
+    // The run's conditions and a signal's price: bone on the card face, no role hue (run variety, RewardRunVariety.kt).
+    RewardChipKind.PATTERN, RewardChipKind.KEYNOTE -> ChipInk(Kk.Ink3, Kk.Bone2.copy(alpha = 0.55f), Kk.Bone, Kk.Bone)
+    RewardChipKind.COST -> ChipInk(Kk.Ink3, Kk.Line2, Kk.Bone, Kk.Bone2)
+    // An omen's mutator is its liability: outlined in the threat role like the cost it names.
+    RewardChipKind.MUTATOR -> ChipInk(roles.threat.copy(alpha = 0.12f), roles.threat, roles.threat, roles.threat)
+}
+
+/** Dashed chip outline of an unmet pairing, cached per stroke width (draw-thread confined). */
+private object ChipStrokes {
+    private var width = -1f
+    private var dashed: Stroke? = null
+
+    fun dashed(strokeWidth: Float, density: Float): Stroke {
+        dashed?.takeIf { width == strokeWidth }?.let { return it }
+        width = strokeWidth
+        return Stroke(strokeWidth, cap = StrokeCap.Butt, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f * density, 3f * density)))
+            .also { dashed = it }
+    }
+}
+
+/**
+ * Draws [chip] at [topLeft] ([width] px from [rewardChipWidth]). [paths] slot 0 holds the plate, slot 1 its
+ * outline and slot 2 an ACTIVE chip's key cap.
+ * Unmet reactions and discords are hatched, an unmet concord is outlined dashed; a reaction's
+ * plate is split in its two element hues.
+ */
+internal fun DrawScope.drawRewardChip(
+    measurer: CanvasTextMeasurer,
+    chip: RewardChip,
+    topLeft: Offset,
+    width: Float,
+    style: RewardChipStyle,
+    paths: KkPathCache,
+    lines: Int = 1,
+    rowGap: Float = 0f,
+) {
+    val roles = measurer.roles
+    val row = style.heightDp * density
+    // A two-line chip spans two rows and the gap between them; its padding and marks keep the one-row sizes.
+    val height = if (lines == 2) row * 2f + rowGap else row
+    val rect = Rect(topLeft, Size(width, height))
+    val plate = paths.slab(0, rect, chipCut(row))
+    val ink = chip.ink(roles)
+    if (ink.face.alpha > 0f) drawPath(plate, ink.face)
+    if (chip.kind == RewardChipKind.REACTION && chip.elements.size == 2) {
+        clipPath(plate) {
+            drawRect(chip.elements[0].overlayColor(roles).copy(alpha = 0.22f), rect.topLeft, Size(rect.width * 0.5f, rect.height))
+            drawRect(chip.elements[1].overlayColor(roles).copy(alpha = 0.22f), Offset(rect.center.x, rect.top), Size(rect.width * 0.5f, rect.height))
+        }
+    }
+    val hatched = !chip.discovered && (chip.kind == RewardChipKind.REACTION || chip.kind == RewardChipKind.DISCORD)
+    if (hatched) {
+        // A faint hatch: the label on top stays legible where hatching carries the threat (color vision).
+        if (chip.kind == RewardChipKind.DISCORD) drawKkThreatHatch(plate, roles, roles.threat.copy(alpha = 0.3f)) else drawKkHatch(plate, Kk.Bone.copy(alpha = 0.12f))
+    }
+    if (chip.kind == RewardChipKind.RISK && roles.hatchThreats) drawKkThreatHatch(plate, roles, Kk.Ink)
+    if (ink.border.alpha > 0f) {
+        val inset = density * 0.75f
+        val outline = paths.slab(1, rect.left + inset, rect.top + inset, rect.right - inset, rect.bottom - inset, chipCut(row))
+        val stroke = if (chip.kind == RewardChipKind.CONCORD && !chip.discovered) ChipStrokes.dashed(1.5f * density, density) else kkStroke(1.5f * density)
+        drawPath(outline, ink.border, style = stroke)
+    }
+    val cy = rect.center.y
+    var x = rect.left + chipPad(row)
+    val glyph = chipGlyph(row)
+    repeat(chip.glyphCount()) { index ->
+        val center = Offset(x + glyph * 0.5f, cy)
+        val rune = chip.rune
+        when {
+            chip.kind == RewardChipKind.SUPPRESSED && index == 1 && rune != null ->
+                // The rune of the bound relic whose liability voids the card, in its aspect hue.
+                drawRelicIcon(rune, ChipRunePolicy, center, glyph * 0.5f, accent = rune.aspect.overlayColor(roles))
+            chip.kind == RewardChipKind.KEYNOTE && chip.tag != null && index == 0 -> drawKkIcon(chip.tag.overlayIcon(), center, glyph, ink.glyph)
+            chip.kind == RewardChipKind.KEYNOTE -> drawKkIcon(chip.elements[0].overlayIcon(), center, glyph, chip.elements[0].overlayColor(roles))
+            chip.kind == RewardChipKind.ATTUNED && index == 0 -> {
+                val half = glyph * 0.28f
+                rotate(45f, center) {
+                    drawRect(chip.aspect?.overlayColor(roles) ?: Kk.Bone2, Offset(center.x - half, center.y - half), Size(half * 2f, half * 2f))
+                }
+            }
+            else -> {
+                val icon = when (chip.kind) {
+                    RewardChipKind.SUPPRESSED -> KkIcon.SYSTEM_LOCKED
+                    RewardChipKind.TAG, RewardChipKind.TAG_TIER, RewardChipKind.ATTUNED -> chip.tag?.overlayIcon() ?: KkIcon.UI_PLUS
+                    RewardChipKind.SIGNATURE -> chip.core?.let { KkIcon.Forms.getOrNull(it.ordinal) } ?: KkIcon.UI_PLUS
+                    RewardChipKind.PATTERN, RewardChipKind.COST, RewardChipKind.MUTATOR -> chip.icon ?: KkIcon.UI_PLUS
+                    else -> chip.elements[index].overlayIcon()
+                }
+                val color = when (chip.kind) {
+                    RewardChipKind.REACTION -> chip.elements[index].overlayColor(roles)
+                    else -> ink.glyph
+                }
+                drawKkIcon(icon, center, glyph, color)
+            }
+        }
+        x += glyph + row * 0.04f
+    }
+    if (chip.glyphCount() > 0) x += chipGap(row) - row * 0.04f
+    if (lines == 2) {
+        // Two lines centred on the chip, each from the same start.
+        val labelStyle = chipLabelStyle(measurer, style)
+        val parts = chipLabelLines(chip.label)
+        val first = measureKkText(measurer, parts[0], labelStyle, uppercase = true)
+        val second = measureKkText(measurer, parts.getOrElse(1) { "" }, labelStyle, uppercase = true)
+        val lead = (first.kkBoxHeight + second.kkBoxHeight) * 0.5f
+        drawKkText(first, x, cy - lead, ink.text, KkAlign.START, KkVAlign.TOP)
+        drawKkText(second, x, cy - lead + first.kkBoxHeight, ink.text, KkAlign.START, KkVAlign.TOP)
+        return
+    }
+    val label = measureKkText(measurer, chip.label, chipLabelStyle(measurer, style), uppercase = true)
+    drawKkText(label, x, cy, ink.text, KkAlign.START, KkVAlign.CENTER)
+    x += label.size.width
+    chip.keyCap?.let { key ->
+        // The bound key as the HUD shows it under a slot: a small bone cap with the key in ink.
+        val cap = measureKeyCap(measurer, key, style)
+        val capHeight = keyCapHeight(height)
+        val left = x + chipGap(height)
+        val capRect = Rect(left, cy - capHeight * 0.5f, left + keyCapWidth(cap, height), cy + capHeight * 0.5f)
+        drawPath(paths.slab(2, capRect, capHeight * 0.22f), Kk.Bone)
+        drawKkText(cap, capRect.center.x, cy, Kk.Ink, KkAlign.CENTER, KkVAlign.CENTER)
+        return
+    }
+    val marks = chip.trailingMarks()
+    if (marks <= 0) return
+    x += chipGap(height)
+    // Sheared tier pips: reached before in bone, gained by this card in `you`, the rest empty.
+    val pipHeight = height * 0.42f
+    val top = cy - pipHeight * 0.5f
+    val gap = height * 0.12f / density
+    drawKkPips(Offset(x, top), marks, chip.after.coerceIn(0, marks), roles.you, sizeDp = pipHeight / density,
+        widthDp = pipWidth(height) / density, gapDp = gap, emptyColor = Kk.Line2)
+    if (chip.before > 0) drawKkPips(Offset(x, top), chip.before.coerceAtMost(marks), chip.before.coerceAtMost(marks), Kk.Bone2,
+        sizeDp = pipHeight / density, widthDp = pipWidth(height) / density, gapDp = gap)
+}
+
+/**
+ * Chips laid out left to right in up to [maxRows] rows of the available width: a chip that does
+ * not fit is left out and the next one tried, so earlier chips (the more important) always show.
+ * The first chip (an active's slot, a relic's Risk, an omen's mutator) is never left out: wider than
+ * the whole row (a long name, a long key or a large text size), it breaks its label into two lines
+ * over two rows where it may ([wraps]) and the flow has them, and is drawn scaled down to the row's
+ * width only as far as it still needs.
+ */
+@Composable
+internal fun RewardChipFlow(
+    chips: List<RewardChip>,
+    style: RewardChipStyle,
+    textScale: Float,
+    modifier: Modifier = Modifier,
+    maxRows: Int = 1,
+    gapDp: Float = 6f,
+    maxCount: Int = Int.MAX_VALUE,
+) {
+    if (chips.isEmpty()) return
+    val measurer = rememberKkCanvasMeasurer(textScale)
+    val density = LocalDensity.current.density
+    val roles = LocalKkRolePalette.current
+    val language = LocalAppLanguage.current
+    val widths = remember(chips, measurer, density, style, roles) {
+        FloatArray(chips.size) { rewardChipWidth(measurer, chips[it], style, density) }
+    }
+    // The first chip's width with its label on two lines (0 when it cannot break).
+    val wrapped = remember(chips, measurer, density, style, roles) {
+        if (chips.first().wraps()) rewardChipWidth(measurer, chips.first(), style, density, lines = 2) else 0f
+    }
+    val rowGap = gapDp * density
+    Layout(
+        content = {
+            chips.forEachIndexed { index, chip -> key(index, chip) {
+                val paths = remember { KkPathCache(3) }
+                Box(
+                    Modifier.size((widths[index] / density).dp, style.heightDp.dp)
+                        .semantics {
+                            text = AnnotatedString(chip.spoken)
+                            // An element chip's label already is its element's name.
+                            if (chip.elements.isNotEmpty() && chip.kind != RewardChipKind.ELEMENT && chip.kind != RewardChipKind.KEYNOTE) {
+                                contentDescription = chip.elements.joinToString(" ") { it.displayLabel.localizedContent(language) } + " " + chip.label
+                            }
+                        }
+                        .drawBehind {
+                            // A first chip laid out over two rows (taller for its width than one row) draws its label on two lines.
+                            val oneRow = style.heightDp * density / widths[index]
+                            val lines = if (index == 0 && wrapped > 0f && size.height / size.width > oneRow * 1.4f) 2 else 1
+                            val natural = if (lines == 2) wrapped else widths[index]
+                            val fit = size.width / natural
+                            if (fit < 0.999f) {
+                                scale(fit, Offset.Zero) { drawRewardChip(measurer, chip, Offset.Zero, natural, style, paths, lines, rowGap) }
+                            } else {
+                                drawRewardChip(measurer, chip, Offset.Zero, size.width, style, paths, lines, rowGap)
+                            }
+                        },
+                )
+            } }
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val gap = (gapDp * density).toInt()
+        val maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE
+        val rowPx = (style.heightDp * density).roundToInt()
+        val rowsGiven = if (constraints.hasBoundedHeight) min(maxRows, ((constraints.maxHeight + gap) / (rowPx + gap)).coerceAtLeast(1)) else maxRows
+        // Too wide for its row, a first chip that can break takes two rows (and the flow to itself) when it has them.
+        if (wrapped > 0f && widths[0].roundToInt() > maxWidth && rowsGiven >= 2) {
+            val tall = rowPx * 2 + gap
+            val fitted = wrapped.roundToInt() > maxWidth
+            // Fixed size: the chip's own (one-row) size must not hold it to one row's height.
+            val first = measurables[0].measure(
+                if (fitted) androidx.compose.ui.unit.Constraints.fixed(maxWidth, (tall * maxWidth / wrapped).toInt())
+                else androidx.compose.ui.unit.Constraints.fixed(wrapped.roundToInt(), tall),
+            )
+            return@Layout layout(first.width.coerceAtLeast(constraints.minWidth), first.height.coerceIn(constraints.minHeight, constraints.maxHeight)) {
+                first.place(0, 0)
+            }
+        }
+        val placeables = measurables.mapIndexed { index, measurable ->
+            val natural = widths[index]
+            if (index == 0 && natural.roundToInt() > maxWidth) {
+                // Its height shrinks with its width, so the scaled chip keeps its proportions.
+                measurable.measure(androidx.compose.ui.unit.Constraints(maxWidth = maxWidth,
+                    maxHeight = (style.heightDp * density * maxWidth / natural).toInt()))
+            } else measurable.measure(androidx.compose.ui.unit.Constraints())
+        }
+        val rowHeight = placeables.maxOfOrNull { it.height } ?: 0
+        val positions = arrayOfNulls<androidx.compose.ui.unit.IntOffset>(placeables.size)
+        // Never more rows than the height given: chips past them are left out like those too wide.
+        val rowsAllowed = if (constraints.hasBoundedHeight && rowHeight > 0) {
+            min(maxRows, ((constraints.maxHeight + gap) / (rowHeight + gap)).coerceAtLeast(1))
+        } else maxRows
+        var row = 0
+        var x = 0
+        var placed = 0
+        var widest = 0
+        for (index in placeables.indices) {
+            if (placed >= maxCount) break
+            val width = placeables[index].width
+            if (width > maxWidth) continue
+            if (x > 0 && x + gap + width > maxWidth) {
+                if (row + 1 >= rowsAllowed) continue
+                row++
+                x = 0
+            }
+            val left = if (x == 0) 0 else x + gap
+            // A scaled first chip sits on its row's center line.
+            positions[index] = androidx.compose.ui.unit.IntOffset(left, row * (rowHeight + gap) + (rowHeight - placeables[index].height) / 2)
+            x = left + width
+            widest = max(widest, x)
+            placed++
+        }
+        val rows = if (placed == 0) 0 else positions.filterNotNull().maxOf { it.y } / (rowHeight + gap).coerceAtLeast(1) + 1
+        val height = if (rows == 0) 0 else rows * rowHeight + (rows - 1) * gap
+        // Chips start at the leading edge: a parent asking for a minimum width gets it as empty space after them.
+        layout(min(widest, maxWidth).coerceAtLeast(constraints.minWidth), height.coerceIn(constraints.minHeight, constraints.maxHeight)) {
+            placeables.forEachIndexed { index, placeable -> positions[index]?.let { placeable.place(it) } }
+        }
+    }
+}
+
+/** A chip draws a relic's rune without rank markers. */
+private val ChipRunePolicy = RelicPolicy(1, 1)
+
+/** Numbers in rule and upside text: signed, with group or decimal separators and an optional unit mark. */
+private val RewardNumber = Regex("[−+×]?\\d+(?:[.,  ]\\d+)*(?:[   ]?%)?")
+
+/** Word joiner: keeps the two sides of a unit's slash on one line ("ед/с", "u/s"). */
+private const val WordJoiner = '\u2060'
+private const val NoBreakSpace = '\u00A0'
+
+/** Unit marks that follow a number and must stay on its line (Matter as an amount's unit: "+6 matter"). */
+private val UnitMarks = arrayOf("%", "u/s", "ед/с", "ед", "s", "с", "matter", "материи")
+
+private fun unitStartsAt(text: String, index: Int): Boolean = UnitMarks.any { mark ->
+    text.startsWith(mark, index) && (index + mark.length >= text.length || !text[index + mark.length].isLetter())
+}
+
+/** The Russian one-letter words (prepositions, conjunctions, "я") that never end a line. */
+private const val RussianShortWords = "авикосуя"
+
+/** Whether [index] holds a Russian one-letter word: never a unit after its number ("3 с" is seconds). */
+private fun shortWordAt(text: String, index: Int): Boolean =
+    text[index].lowercaseChar() in RussianShortWords && (index == 0 || !text[index - 1].isLetterOrDigit()) &&
+        !(index >= 2 && text[index - 1].isWhitespace() && text[index - 2].isDigit() && unitStartsAt(text, index))
+
+/**
+ * [text] with its units kept whole and on their number's line: the space between a number and its
+ * unit becomes a no-break space, and a slash between two marks ("ед/с", "u/s", "3/4") is held by
+ * word joiners, so the line breaker never splits "40 %" or "ед/с". A Russian one-letter word ("к",
+ * "в", "и") keeps the word after it the same way, so it never hangs at a line's end. [offsets]
+ * (text length + 1), when given, receives where each original character landed.
+ */
+internal fun rewardKeepUnits(text: String, offsets: IntArray? = null): String {
+    val out = StringBuilder(text.length + 4)
+    for (index in text.indices) {
+        offsets?.set(index, out.length)
+        val char = text[index]
+        when {
+            char == ' ' && index > 0 && text[index - 1].isDigit() && unitStartsAt(text, index + 1) -> out.append(NoBreakSpace)
+            char == ' ' && index > 0 && shortWordAt(text, index - 1) -> out.append(NoBreakSpace)
+            char == '/' && index > 0 && index < text.lastIndex && !text[index - 1].isWhitespace() && !text[index + 1].isWhitespace() ->
+                out.append(WordJoiner).append('/').append(WordJoiner)
+            else -> out.append(char)
+        }
+    }
+    offsets?.set(text.length, out.length)
+    return out.toString()
+}
+
+/**
+ * [text] with its numbers in [number] (semi-bold) and the [emphasis] ranges (a relic's rank
+ * values) in [emphasisColor] bold; the rest keeps the paragraph color.
+ */
+internal fun rewardRichText(
+    text: String,
+    number: Color,
+    emphasis: List<IntRange> = emptyList(),
+    emphasisColor: Color = number,
+): AnnotatedString = buildAnnotatedString {
+    val offsets = IntArray(text.length + 1)
+    val shown = rewardKeepUnits(text, offsets)
+    append(shown)
+    RewardNumber.findAll(shown).forEach { match ->
+        addStyle(SpanStyle(color = number, fontWeight = FontWeight.SemiBold), match.range.first, match.range.last + 1)
+    }
+    emphasis.forEach { range ->
+        if (range.first in text.indices && range.last in text.indices) {
+            addStyle(SpanStyle(color = emphasisColor, fontWeight = FontWeight.Bold), offsets[range.first], offsets[range.last + 1])
+        }
+    }
+}
