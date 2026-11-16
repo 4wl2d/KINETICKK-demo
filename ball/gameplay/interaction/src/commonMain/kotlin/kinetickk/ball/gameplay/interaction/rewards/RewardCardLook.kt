@@ -17,7 +17,7 @@ import kotlin.math.sqrt
  * The look of one reward card under one palette, in two channels that never mix: the rarity
  * channel is the [style]'s material alone (the frame: border, band, echo, glow, effects), the type
  * channel is the face (the [hue] and pattern by element, the preset's volt for Kinetic; the ornament
- * by primary tag, watermark and seed).
+ * by primary tag, the watermark or a scene, and seed).
  */
 internal class RewardCardLook(
     val style: KkCardStyle,
@@ -25,7 +25,10 @@ internal class RewardCardLook(
     val hue: Color,
     /** The second element hue, or [hue] when the card has one. */
     val secondHue: Color,
+    val scene: RewardScene? = null,
 ) {
+    val sceneInk: RewardSceneInk? = scene?.let { RewardSceneInk(hue, secondHue) }
+
     /** Whether anything is drawn behind the text, so the text rows need the soft face plates. */
     val needsPlates: Boolean get() = style.drawsBehindText
 

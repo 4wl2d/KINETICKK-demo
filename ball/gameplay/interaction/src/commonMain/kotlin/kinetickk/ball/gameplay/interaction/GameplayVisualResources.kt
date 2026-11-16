@@ -6,6 +6,8 @@ package kinetickk.ball.gameplay.interaction
 import kinetickk.ball.content.api.EliteAffix
 import kinetickk.ball.gameplay.interaction.canvas.WorldStrokes
 import kinetickk.ball.gameplay.interaction.canvas.WorldUnitShapes
+import kinetickk.ball.gameplay.interaction.canvas.fx.PixelSheet
+import kinetickk.ball.gameplay.interaction.canvas.fx.prepareCombatPixelText
 import kinetickk.ball.gameplay.interaction.fx.PixelFxClock
 import kinetickk.ball.gameplay.interaction.fx.PixelLooks
 import kinetickk.ball.gameplay.interaction.fx.PixelSkillLooks
@@ -40,6 +42,8 @@ suspend fun prepareGameplayVisualResources() {
 
 /** Prepares the effect timing and look tables before the first run. */
 private fun preparePixelFx() {
+    PixelSheet.prepare()
+    prepareCombatPixelText()
     PixelFxClock.ticks(PixelStrip.entries.first())
     PixelLooks.maxReactionSeconds
     PixelSkillLooks.maxLife

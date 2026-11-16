@@ -46,7 +46,7 @@ internal enum class SessionRedesignText(
         "Defeat the Architect to complete the demo. You can start another run at any time.",
         "Победите Архитектора, чтобы пройти демо. Новый забег можно начать в любое время.",
     ),
-    VERSION("Demo v0.6.0", "Демо v0.6.0"),
+    VERSION("Demo v0.6.1", "Демо v0.6.1"),
     QUIT("Quit", "Выход"),
     QUIT_DESCRIPTION("Quit the game", "Выйти из игры"),
 

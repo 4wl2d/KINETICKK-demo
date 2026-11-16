@@ -19,6 +19,8 @@ The demo is a standalone game with its own Git history, build, versioned release
 
 The public scope is Orb, Prism, Shard, the items available through the Architect fight, and the permanent Matter upgrades listed in the Workshop. The Architect is the run's final encounter. Keep later progression, gated content, higher upgrade effects, original full-edition assets, authoring tools, and store or signing configuration in the full edition.
 
+Draw demo combat effects and reward-card artwork with the demo renderer and its approved resources. Use the full game's visuals as a reference when refining the demo's look.
+
 Purchases look up the next implemented tier. Loading a save and turning purchased levels into gameplay effects use the same tier data. When adjusting an upgrade, check the last tier in all three paths. Verify that editing the save balance, changing an unlock setting, or supplying a level above the last implemented tier leaves the demo within its catalog.
 
 For each update:
@@ -56,4 +58,4 @@ gh release edit <version> --draft=false --latest
 The site can receive a new version through the same manifest contract after
 its demo route is deployed.
 
-For 0.6.0, verify that the public release manifest and the site's `/game/release.json` report version 0.6.0. Open the site's `/game/` entry point and check that the deployed game reaches the menu and starts a run.
+Verify that the public release manifest and the site's `/game/release.json` report the published version. Open the site's `/game/` entry point and check that the deployed game reaches the menu and starts a run.

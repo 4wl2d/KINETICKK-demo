@@ -8,6 +8,7 @@ import kinetickk.foundation.design.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import kinetickk.ball.content.api.StatusElement
 import kinetickk.ball.gameplay.interaction.fx.PixelFxClock
@@ -18,10 +19,12 @@ import kinetickk.ball.gameplay.nucleus.render.EnemyMarkVisual
 import kinetickk.ball.gameplay.nucleus.render.EnemyProjection
 import kinetickk.ball.gameplay.nucleus.render.GameplayRenderModel
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kinetickk.ball.gameplay.interaction.canvas.*
@@ -35,6 +38,70 @@ import kinetickk.ball.gameplay.interaction.canvas.fx.*
  */
 
 private const val TAU = CanvasMath.TAU
+
+private const val BRAKE_FPS = 12
+private const val BRAKE_FRAMES = 6
+private const val DASH_PHASE_SECONDS = 0.24f
+private const val DASH_PHASE_FRAMES = 5
+private const val CONTROL_ARCS = 4
+private val ControlArcPath = Path()
+
+/** Short braking coils and a Dash halo that disperses during the phase. */
+internal fun DrawScope.drawCoreMarks(engine: GameplayRenderModel, center: Offset, roles: KkRolePalette) {
+    val scale = engine.worldScale
+    if (engine.braking) {
+        val tick = PixelFxClock.tick(engine.renderElapsed, BRAKE_FPS) % BRAKE_FRAMES
+        val pulse = 1f - abs(tick - 2.5f) / 2.5f
+        drawControlArcs(
+            center, engine.coreRadius + 5f + 3f * pulse, 0.1f * tick, cells = 4,
+            scale = scale, cellSize = 2f, color = Kk.Bone.copy(alpha = 0.65f + 0.25f * pulse),
+        )
+    }
+    if (engine.dashPhaseTime > 0f) {
+        val age = engine.stepAge(DASH_PHASE_SECONDS - engine.dashPhaseTime)
+        val frame = (age / DASH_PHASE_SECONDS * DASH_PHASE_FRAMES).toInt().coerceIn(0, DASH_PHASE_FRAMES - 1)
+        val fade = 1f - frame / DASH_PHASE_FRAMES.toFloat()
+        drawControlArcs(
+            center, engine.coreRadius + 10f - frame, 0.64f + 0.21f * frame, cells = 7 - frame,
+            scale = scale, cellSize = 4f - 0.5f * frame, color = roles.you.copy(alpha = 0.52f * fade),
+        )
+        drawControlArcs(
+            center, engine.coreRadius + 8f - frame, 0.69f + 0.21f * frame, cells = 6 - frame,
+            scale = scale, cellSize = 2f, color = roles.you.copy(alpha = 0.95f * fade),
+        )
+    }
+}
+
+private fun DrawScope.drawControlArcs(
+    center: Offset,
+    radius: Float,
+    turn: Float,
+    cells: Int,
+    scale: Float,
+    cellSize: Float,
+    color: Color,
+) {
+    val path = ControlArcPath
+    path.rewind()
+    val unit = PixelSheet.step(scale, cellSize)
+    val side = unit / scale
+    val cellAngle = 0.09f
+    for (segment in 0 until CONTROL_ARCS) {
+        val start = turn + segment * TAU / CONTROL_ARCS
+        for (cell in 0 until cells) {
+            val angle = start + cell * cellAngle
+            val x = ((center.x + radius * cos(angle)) * scale - 0.5f * unit).roundToInt() / scale
+            val y = ((center.y + radius * sin(angle)) * scale - 0.5f * unit).roundToInt() / scale
+            path.moveTo(x, y)
+            path.lineTo(x + side, y)
+            path.lineTo(x + side, y + side)
+            path.lineTo(x, y + side)
+            path.close()
+        }
+    }
+    FxDrawBudget.take(FxPool.CORE_STATES, 1, signature = true)
+    drawPath(path, color)
+}
 
 private val THERMAL = StatusElement.THERMAL.ordinal
 private val CRYO = StatusElement.CRYO.ordinal

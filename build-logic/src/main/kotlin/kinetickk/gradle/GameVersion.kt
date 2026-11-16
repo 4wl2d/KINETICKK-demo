@@ -4,4 +4,4 @@
 package kinetickk.gradle
 
 /** Version of the demo published by this repository. */
-const val GAME_VERSION: String = "0.6.0"
+const val GAME_VERSION: String = "0.6.1"

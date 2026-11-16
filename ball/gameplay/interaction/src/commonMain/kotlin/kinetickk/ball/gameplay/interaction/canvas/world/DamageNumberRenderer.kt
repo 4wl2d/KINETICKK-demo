@@ -32,7 +32,10 @@ internal const val DAMAGE_NUMBER_FPS = 24
 /** The default Text size setting (`PlayerPreferences.textScale`): numbers have their standard texel size at it. */
 private const val STANDARD_TEXT_SCALE = 1.25f
 
-/** Draws damage and critical-hit labels, with hit effects on the cue's clock. */
+private const val CRITICAL_GAP_TEXELS = 2
+private const val GLYPH_OUTLINE_TEXELS = 1
+
+/** Slanted pixel damage labels and critical-hit stamps move on the cue’s stepped clock. */
 internal fun DrawScope.drawDamageNumbers(
     engine: GameplayRenderModel,
     visualFx: VisualFxProjection,
@@ -70,23 +73,27 @@ internal fun DrawScope.drawDamageNumbers(
         val location = worldOnScreen(engine, number.x + number.driftX * drift, number.y + number.driftY * drift, shakeX, shakeY)
         if (!isOnScreen(location, 80f)) continue
         val text = number.formattedAmount(settings.damageNumberFormat, textMeasurer.language)
-        val label = measureKkText(textMeasurer, text, textMeasurer.typography.condStyle(effectLabelSize(textMeasurer, step)))
-        val half = label.size.width * 0.5f
-        val halfHeight = label.kkBoxHeight * 0.5f
-        val critText = if (textMeasurer.language == AppLanguage.Russian) "КРИТ" else "CRIT"
-        val crit = if (number.critical) {
-            val critSize = effectLabelSize(textMeasurer, sizeStep) * 0.75f
-            measureKkText(textMeasurer, critText, textMeasurer.typography.labelStyle(critSize))
-        } else null
-        val right = half + if (crit != null) d(4f) + crit.size.width else 0f
-        val x = keepInside(location.x, half, right, size.width, edge)
-        val y = keepInside(location.y, halfHeight, halfHeight, size.height, edge)
-        if (crit != null) {
+        val crit = if (textMeasurer.language == AppLanguage.Russian) "КРИТ" else "CRIT"
+        val stampStep = max(1, damageNumberStep(sizeStep, tick))
+        val stampWidth = if (number.critical) (combatLabelWidth(crit) + GLYPH_OUTLINE_TEXELS) * stampStep else 0
+        val stampGap = if (number.critical) CRITICAL_GAP_TEXELS * stampStep else 0
+        val texels = combatLabelWidth(text, slanted = true)
+        val availableStep = ((size.width - 2f * edge - stampWidth - stampGap) / (texels + 2)).toInt().coerceAtLeast(1)
+        val labelStep = min(step, availableStep)
+        val half = texels * labelStep * 0.5f
+        val halfHeight = COMBAT_LETTER_HEIGHT * labelStep * 0.5f
+        val right = half + stampGap + stampWidth + GLYPH_OUTLINE_TEXELS * labelStep
+        val above = halfHeight + max(labelStep, if (number.critical) stampStep else 0)
+        val below = if (number.critical) {
+            max(halfHeight + labelStep, (COMBAT_LETTER_HEIGHT + GLYPH_OUTLINE_TEXELS) * stampStep - halfHeight)
+        } else halfHeight + labelStep
+        val x = keepInside(location.x, half + labelStep, right, size.width, edge)
+        val y = keepInside(location.y, above, below, size.height, edge)
+        if (number.critical) {
             drawCriticalHit(age, Offset(x, y), roles.threat, worldStep)
-            drawKkText(crit, x + half + d(4f), y, roles.threat, valign = KkVAlign.CENTER)
+            drawCombatLabel(crit, x + half + stampGap, y - halfHeight, stampStep, roles.threat)
         }
-        drawKkText(label, x + d(1f), y + d(1f), Kk.Ink, KkAlign.CENTER, KkVAlign.CENTER)
-        drawKkText(label, x, y, color, KkAlign.CENTER, KkVAlign.CENTER)
+        drawCombatLabel(text, x - half, y - halfHeight, labelStep, color, slanted = true)
     }
 }
 
@@ -96,9 +103,6 @@ private fun DrawScope.drawCriticalHit(age: Float, anchor: Offset, color: Color, 
     FxDrawBudget.take(FxPool.TRANSIENT, 1, signature = true)
     drawPixelFrame(PixelStrip.CRIT, frame, anchor.x, anchor.y, 1f, PixelPalettes.of(color), worldStep)
 }
-
-internal fun DrawScope.effectLabelSize(measurer: TextMeasurer, step: Int): Float =
-    11f * step / (density * fontScale * measurer.scale)
 
 /**
  * Moves a label centered at [center] with extents [before]/[after] along one axis so it lies

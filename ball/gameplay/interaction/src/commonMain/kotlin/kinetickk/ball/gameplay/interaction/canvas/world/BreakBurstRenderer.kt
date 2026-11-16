@@ -4,14 +4,19 @@
 package kinetickk.ball.gameplay.interaction.canvas.world
 
 import kinetickk.foundation.design.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import kinetickk.ball.gameplay.nucleus.render.GameplayRenderModel
 import kinetickk.ball.gameplay.interaction.fx.PixelFxClock
 import kinetickk.ball.gameplay.interaction.fx.VisualFxProjection
+import kinetickk.ball.gameplay.interaction.canvas.fx.COMBAT_LETTER_HEIGHT
 import kinetickk.ball.gameplay.interaction.canvas.fx.PIXEL_FX_TEXEL
+import kinetickk.ball.gameplay.interaction.canvas.fx.combatLabelWidth
+import kinetickk.ball.gameplay.interaction.canvas.fx.drawCombatLabel
 import kinetickk.ball.gameplay.interaction.canvas.*
 import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Reaction name stamps slam, hold and go out on ticks of this frame rate. */
@@ -26,7 +31,7 @@ private const val STAMP_TEXEL_MULTIPLE = 2
 /** A stamp stands this many device pixels above its enemy. */
 private const val STAMP_RISE = 46f
 
-/** Uses the interface fonts to draw a brief mark when the player discovers a reaction. */
+/** The first time a reaction is discovered, layer its pixel label over a second-hue echo and ink shadow. */
 internal fun DrawScope.drawReactionStamps(
     engine: GameplayRenderModel,
     visualFx: VisualFxProjection,
@@ -50,22 +55,23 @@ internal fun DrawScope.drawReactionStamps(
         val layers = reactionStampLayers(tick, stamp.maxLife)
         if (layers == 0) continue
         val name = WorldStrings.reactionName(definition.name, stamp.reaction, textMeasurer.language)
-        val step = reactionStampStep(STAMP_TEXEL_MULTIPLE * max(1, unit.roundToInt()), tick)
-        val echo = reactionStampEcho(tick) * step
+        val texels = combatLabelWidth(name, slanted = true)
+        val echoTexels = reactionStampEcho(tick)
+        val fits = ((size.width - edge * 2f) / (texels + echoTexels + 3)).toInt().coerceAtLeast(1)
+        val step = min(reactionStampStep(STAMP_TEXEL_MULTIPLE * max(1, unit.roundToInt()), tick), fits)
+        val echo = echoTexels * step
         val shadow = echo + step
-        val style = textMeasurer.typography.condStyle(effectLabelSize(textMeasurer, step))
-        val available = (size.width - (edge + shadow) * 2f).coerceAtLeast(1f)
-        val label = measureKkText(textMeasurer, name, style, uppercase = true, maxWidth = available)
-        val half = label.size.width * 0.5f
-        val halfHeight = label.kkBoxHeight * 0.5f
-        val x = keepInside(center.x, half, half + shadow, size.width, edge)
-        val y = keepInside(center.y - STAMP_RISE, halfHeight, halfHeight + shadow, size.height, edge)
-        if (layers >= 2) drawKkText(label, x + shadow, y + shadow, Kk.Ink, KkAlign.CENTER, KkVAlign.CENTER)
+        val half = texels * step * 0.5f
+        val halfHeight = COMBAT_LETTER_HEIGHT * step * 0.5f
+        val x = keepInside(center.x, half + step, half + shadow + step, size.width, edge) - half
+        val y = keepInside(center.y - STAMP_RISE, halfHeight + step, halfHeight + shadow + step, size.height, edge) - halfHeight
+        if (layers >= 2) drawCombatLabel(name, x + shadow, y + shadow, step, Kk.Ink, slanted = true, silhouetteOnly = true)
         if (layers >= 3) {
             val second = roles.element(definition.id.second.ordinal)
-            drawKkText(label, x + echo, y + echo, second, KkAlign.CENTER, KkVAlign.CENTER)
+            drawCombatLabel(name, x + echo, y + echo, step, second, slanted = true, silhouetteOnly = true)
         }
-        drawKkText(label, x, y, roles.element(definition.id.first.ordinal), KkAlign.CENTER, KkVAlign.CENTER)
+        val first = roles.element(definition.id.first.ordinal)
+        drawCombatLabel(name, x, y, step, kkMix(first, Color.White, 0.55f), slanted = true)
     }
 }
 

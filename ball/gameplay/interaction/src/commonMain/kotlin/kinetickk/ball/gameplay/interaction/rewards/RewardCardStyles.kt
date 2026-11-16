@@ -12,6 +12,7 @@ import kinetickk.ball.content.api.EffectClause
 import kinetickk.ball.content.api.EffectCondition
 import kinetickk.ball.content.api.EffectTrigger
 import kinetickk.ball.content.api.ItemDefinition
+import kinetickk.ball.content.api.ItemRarity
 import kinetickk.ball.content.api.ItemEffect
 import kinetickk.ball.content.api.ItemRule
 import kinetickk.ball.content.api.ObstacleAspect
@@ -66,25 +67,7 @@ internal fun buildRewardCardLook(presentation: RewardCardPresentation, roles: Kk
             val style = KkCardStyle(KkCardMaterial.CALM, Kk.Mute2, spectrum = roles.spectrum)
             RewardCardLook(style, Kk.Mute2, Kk.Mute2)
         }
-        item != null -> {
-            val primary = item.elements.getOrNull(0)
-            val second = item.elements.getOrNull(1)
-            // The rarity takes the material of its rank; the type (Kinetic is the preset's volt) takes the face.
-            val hue = primary?.overlayColor(roles) ?: roles.kinetic
-            val secondHue = second?.overlayColor(roles) ?: Color.Unspecified
-            val material = KkCardMaterial.ofRank(item.rarity.rank)
-            val style = KkCardStyle(
-                material = material,
-                hue = hue,
-                pattern = primary?.let { elementFill(it.ordinal) } ?: KineticFill,
-                ornament = item.tags.firstOrNull()?.cardOrnament() ?: KkCardOrnament.PATTERN_CORNER,
-                watermark = item.watermarkIcon(),
-                seed = ItemSeed + item.id,
-                patternBoost = patternBoost(hue, roles),
-                spectrum = roles.spectrum,
-            )
-            RewardCardLook(style, hue, if (secondHue.isSpecified) secondHue else hue)
-        }
+        item != null -> itemCardLook(item, roles)
         relic != null -> {
             val element = relic.aspect.element
             // An aspect supplies the face hue. Every relic takes the same chrome frame.
@@ -166,6 +149,28 @@ internal fun buildRewardCardLook(presentation: RewardCardPresentation, roles: Kk
             RewardCardLook(style, hue, hue)
         }
     }
+}
+
+private fun itemCardLook(item: ItemDefinition, roles: KkRolePalette): RewardCardLook {
+    val primary = item.elements.getOrNull(0)
+    val second = item.elements.getOrNull(1)
+    // The rarity takes the material of its rank; the type (Kinetic is the preset's volt) takes the face.
+    val hue = primary?.overlayColor(roles) ?: roles.kinetic
+    val secondHue = second?.overlayColor(roles) ?: Color.Unspecified
+    val material = KkCardMaterial.ofRank(item.rarity.rank)
+    val scene = if (item.rarity == ItemRarity.EPIC) rewardScene(item) else null
+    val style = KkCardStyle(
+        material = material,
+        hue = hue,
+        pattern = primary?.let { elementFill(it.ordinal) } ?: KineticFill,
+        ornament = item.tags.firstOrNull()?.cardOrnament() ?: KkCardOrnament.PATTERN_CORNER,
+        watermark = if (scene == null) item.watermarkIcon() else null,
+        seed = ItemSeed + item.id,
+        ornamentLeft = scene != null,
+        patternBoost = patternBoost(hue, roles),
+        spectrum = roles.spectrum,
+    )
+    return RewardCardLook(style, hue, if (secondHue.isSpecified) secondHue else hue, scene)
 }
 
 /** Relic frames use chrome for every aspect. */

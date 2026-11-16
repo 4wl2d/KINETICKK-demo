@@ -6,9 +6,9 @@ package kinetickk.ball.gameplay.interaction.canvas.fx
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.PaintingStyle
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import kinetickk.ball.content.api.ReactionId
 import kinetickk.ball.gameplay.interaction.fx.PixelFxClock
@@ -16,6 +16,7 @@ import kinetickk.ball.gameplay.interaction.fx.PixelStrip
 import kinetickk.foundation.design.Kk
 import kinetickk.foundation.design.KkRolePalette
 import kinetickk.foundation.design.kkMix
+import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -28,13 +29,21 @@ internal const val PIXEL_RING_OPS = 4
 
 /** Shared device-pixel scale for geometric effects. */
 internal object PixelSheet {
+    fun prepare() {
+        EffectSprites.of(PixelStrip.HIT, 0, aimed = false)
+        EffectRings.warmUp()
+        EffectDither.shader(0)
+        EffectLinks.shader(PixelStrip.LINK_COIL, 0)
+    }
+
     fun step(scale: Float, texel: Float = PIXEL_FX_TEXEL): Int = max(1, (texel * scale).roundToInt())
 }
 
 /** Retains the small set of tint filters used by the world renderer. */
 internal object PixelPalettes {
     private const val SLOTS = 64
-    private val colors = LongArray(SLOTS)
+    private val bodies = LongArray(SLOTS)
+    private val highlights = LongArray(SLOTS)
     private val filters = arrayOfNulls<ColorFilter>(SLOTS)
     private var count = 0
     private var oldest = 0
@@ -56,49 +65,42 @@ internal object PixelPalettes {
         for (reaction in ReactionId.entries) duo(roles.element(reaction.first.ordinal), roles.element(reaction.second.ordinal))
     }
 
-    fun duo(a: Color, b: Color): ColorFilter = of(kkMix(a, b, 0.5f))
+    fun duo(a: Color, b: Color): ColorFilter = of(a, b)
 
-    fun of(hue: Color): ColorFilter {
-        val key = hue.value.toLong()
-        for (index in 0 until count) if (colors[index] == key) return filters[index]!!
+    fun of(hue: Color): ColorFilter = of(hue, kkMix(hue, Color.White, 0.6f))
+
+    private fun of(body: Color, highlight: Color): ColorFilter {
+        val bodyKey = body.value.toLong()
+        val highlightKey = highlight.value.toLong()
+        for (index in 0 until count) {
+            if (bodies[index] == bodyKey && highlights[index] == highlightKey) return filters[index]!!
+        }
         val slot = if (count < SLOTS) count++ else oldest++ % SLOTS
-        return ColorFilter.tint(hue).also {
-            colors[slot] = key
+        return ColorFilter.colorMatrix(ColorMatrix(floatArrayOf(
+            body.red, highlight.red, 0f, 0f, 0f,
+            body.green, highlight.green, 0f, 0f, 0f,
+            body.blue, highlight.blue, 0f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f,
+        ))).also {
+            bodies[slot] = bodyKey
+            highlights[slot] = highlightKey
             filters[slot] = it
         }
     }
 }
 
-/** These draw-thread resources are independent of the viewport and effect. */
-private object EffectPaint {
-    val paint by lazy { Paint().apply { isAntiAlias = true } }
-    val diamond by lazy {
-        Path().apply {
-            moveTo(1f, 0f)
-            lineTo(0f, 1f)
-            lineTo(-1f, 0f)
-            lineTo(0f, -1f)
-            close()
-        }
-    }
-    val chevron by lazy {
-        Path().apply {
-            moveTo(-1f, -1f)
-            lineTo(1f, 0f)
-            lineTo(-1f, 1f)
-        }
-    }
+/** A draw-thread paint shared by the retained pixel paths and repeating textures. */
+internal object EffectPaint {
+    private val paint by lazy { Paint().apply {
+        isAntiAlias = false
+        filterQuality = FilterQuality.None
+    } }
 
     fun fill(palette: ColorFilter, alpha: Float): Paint = paint.apply {
-        color = Color.White
+        shader = null
+        color = Color.Red
         colorFilter = palette
         this.alpha = alpha
-        style = PaintingStyle.Fill
-    }
-
-    fun stroke(palette: ColorFilter, alpha: Float, width: Float): Paint = fill(palette, alpha).apply {
-        style = PaintingStyle.Stroke
-        strokeWidth = width
     }
 }
 
@@ -134,23 +136,20 @@ private fun DrawScope.drawPieceFrame(
     aimed: Boolean,
 ) {
     if (frame < 0 || alpha <= 0f) return
-    val progress = if (strip.frames > 1) frame.toFloat() / (strip.frames - 1) else 0f
-    val fade = alpha * (1f - 0.72f * progress)
-    val unit = step / scale
+    val progress = if (strip.frames > 1) (frame.toFloat() / (strip.frames - 1)).coerceIn(0f, 1f) else 0f
+    val sprite = EffectSprites.of(strip, frame, aimed)
     val broad = strip.w >= 32 && strip.h >= 32
-    val extent = if (broad) 0.14f + 0.29f * progress else 0.24f - 0.09f * progress
-    val halfWidth = strip.w * unit * extent
-    val halfHeight = strip.h * unit * extent
+    val share = if (broad) 0.36f + 0.44f * progress else 0.82f - 0.41f * progress
+    val unitX = max(1, (step * strip.w * share / sprite.width).roundToInt()) / scale
+    val unitY = max(1, (step * strip.h * share / sprite.height).roundToInt()) / scale
+    val fade = alpha * (1f - 0.68f * progress)
     val canvas = drawContext.canvas
     canvas.save()
     canvas.translate((x * scale).roundToInt() / scale, (y * scale).roundToInt() / scale)
     if (angle != 0f) canvas.rotate(angle)
-    canvas.scale(if (flipX) -halfWidth else halfWidth, if (flipY) -halfHeight else halfHeight)
-    when {
-        aimed -> canvas.drawPath(EffectPaint.chevron, EffectPaint.stroke(palette, fade, 0.24f))
-        broad -> canvas.drawPath(EffectPaint.diamond, EffectPaint.stroke(palette, fade, 0.13f))
-        else -> canvas.drawPath(EffectPaint.diamond, EffectPaint.fill(palette, fade))
-    }
+    canvas.scale(if (flipX) -unitX else unitX, if (flipY) -unitY else unitY)
+    canvas.translate(-(sprite.width / 2).toFloat(), -(sprite.height / 2).toFloat())
+    canvas.drawImage(sprite.bitmap, Offset.Zero, EffectPaint.fill(palette, fade))
     canvas.restore()
 }
 
@@ -173,7 +172,7 @@ internal fun DrawScope.drawPixelAimed(
         flipX = false, flipY = false, angle = eighth * 45f, aimed = true)
 }
 
-/** Fills a hazard or screen boundary with a stepped level of opacity. */
+/** Fills a hazard or screen boundary with a repeating pixel pattern. */
 internal fun DrawScope.drawPixelFill(
     left: Float,
     top: Float,
@@ -189,8 +188,15 @@ internal fun DrawScope.drawPixelFill(
     val endX = (right * scale).roundToInt() / scale
     val endY = (bottom * scale).roundToInt() / scale
     if (endX <= x || endY <= y || alpha <= 0f) return 0
-    val opacity = (level.coerceIn(0, PIXEL_FILL_LEVELS - 1) + 1f) / PIXEL_FILL_LEVELS
-    drawContext.canvas.drawRect(x, y, endX, endY, EffectPaint.fill(palette, alpha * opacity))
+    val unit = PixelSheet.step(scale) / scale
+    val canvas = drawContext.canvas
+    canvas.save()
+    canvas.translate(x, y)
+    canvas.scale(unit, unit)
+    val paint = EffectPaint.fill(palette, alpha)
+    paint.shader = EffectDither.shader(level.coerceIn(0, PIXEL_FILL_LEVELS - 1))
+    canvas.drawRect(0f, 0f, (endX - x) / unit, (endY - y) / unit, paint)
+    canvas.restore()
     return 1
 }
 
@@ -206,15 +212,12 @@ internal fun DrawScope.drawPixelRing(
     alpha: Float = 1f,
 ) {
     if (radius <= 0f || alpha <= 0f) return
-    val phase = stage.coerceIn(0, 4)
-    val width = (3f - phase * 0.48f) * PixelSheet.step(scale) / scale
-    val fade = alpha * (1f - phase * 0.17f)
-    val canvas = drawContext.canvas
-    for (quadrant in 0..3) {
-        val paint = EffectPaint.stroke(if (quadrant and 1 == 0) palette else paletteB, fade, width)
-        canvas.drawArc(x - radius, y - radius, x + radius, y + radius, quadrant * 90f, 90f - phase * 11f, false, paint)
-    }
+    EffectRings.draw(drawContext.canvas, x, y, radius, stage, scale, palette, paletteB, alpha)
 }
+
+private const val LINK_PATTERN_WIDTH = 16f
+private const val LINK_PATTERN_HEIGHT = 5f
+private const val DEGREES_PER_RADIAN = 57.29578f
 
 /** Draws a link up to its cue's length and draw budget. */
 internal fun DrawScope.drawPixelLink(
@@ -235,10 +238,20 @@ internal fun DrawScope.drawPixelLink(
     val reach = sqrt(dx * dx + dy * dy)
     val unit = PixelSheet.step(scale) / scale
     if (frame < 0 || reach < unit || alpha <= 0f || maxTiles <= 0) return 0
-    val extent = if (stretched) 1f else min(1f, maxTiles * strip.w * unit / reach)
-    val width = (strip.h * 0.18f + 0.3f * (frame and 1)) * unit
-    val paint = EffectPaint.stroke(palette, alpha, width)
-    drawContext.canvas.drawLine(Offset(fromX, fromY), Offset(fromX + dx * extent, fromY + dy * extent), paint)
+    val tileWidth = if (stretched) reach else strip.w * unit
+    val drawn = if (stretched) reach else min(reach, maxTiles * tileWidth)
+    val width = tileWidth / LINK_PATTERN_WIDTH
+    val height = (strip.h * 0.6f).coerceAtLeast(1f) * unit / LINK_PATTERN_HEIGHT
+    val canvas = drawContext.canvas
+    canvas.save()
+    canvas.translate(fromX, fromY)
+    canvas.rotate(atan2(dy, dx) * DEGREES_PER_RADIAN)
+    canvas.scale(width, height)
+    canvas.translate(0f, -LINK_PATTERN_HEIGHT * 0.5f)
+    val paint = EffectPaint.fill(palette, alpha)
+    paint.shader = EffectLinks.shader(strip, frame)
+    canvas.drawRect(0f, 0f, drawn / width, LINK_PATTERN_HEIGHT, paint)
+    canvas.restore()
     return 1
 }
 

@@ -86,6 +86,11 @@ enum class KkIcon(val key: String, vararg layerData: KkIconLayer) {
         KkIconLayer("M2 12a2 2 0 1 0 4 0a2 2 0 1 0 -4 0Z", KkIconStyle.FILL),
         KkIconLayer("M11 9h1M11 15h1M15.5 6h1M15.5 12h1M15.5 18h1M20 4h1M20 9.5h1M20 14.5h1M20 20h1", KkIconStyle.STROKE),
     ),
+    SKILL_CATALYZE(
+        "skill.catalyze",
+        KkIconLayer("M10 5l6 13H4Z", KkIconStyle.STROKE),
+        KkIconLayer("M17 9l4-3M18 12h4M17 15l4 3", KkIconStyle.STROKE),
+    ),
     SYSTEM_INTEGRITY(
         "system.integrity",
         KkIconLayer("M12 2 21 7v10l-9 5-9-5V7Z", KkIconStyle.STROKE),

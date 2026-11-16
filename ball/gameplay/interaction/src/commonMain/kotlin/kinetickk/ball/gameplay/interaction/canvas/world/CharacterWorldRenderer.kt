@@ -25,8 +25,6 @@ import kinetickk.foundation.design.kkStroke
 import kotlin.math.cos
 import kotlin.math.sin
 
-private const val DASH_PHASE_SECONDS = 0.24f
-
 private fun DrawScope.drawCoreForm(engine: GameplayRenderModel, center: Offset, fill: Color, roles: KkRolePalette) {
     val path = KkFormPaths.of(engine.coreShape.formIndex(), engine.coreRadius)
     translate(center.x, center.y) {
@@ -36,17 +34,6 @@ private fun DrawScope.drawCoreForm(engine: GameplayRenderModel, center: Offset, 
     if (engine.coreShape == CoreShape.PRISM) {
         val ability = engine.characterAbility
         drawFacetRing(ability.facets, ability.facetProgress, center, engine.renderElapsed, roles)
-    }
-}
-
-private fun DrawScope.drawCoreMarks(engine: GameplayRenderModel, center: Offset, roles: KkRolePalette) {
-    val rim = engine.coreRadius + 10f
-    if (engine.braking) {
-        drawCircle(Kk.Bone.copy(alpha = 0.8f), rim, center, style = WorldStrokes.dashedThin)
-    }
-    if (engine.dashPhaseTime > 0f) {
-        val alpha = (engine.dashPhaseTime / DASH_PHASE_SECONDS).coerceIn(0f, 1f)
-        drawCircle(roles.you.copy(alpha = alpha), rim + 4f, center, style = kkStroke(KkStrokeWidth.Line2))
     }
 }
 

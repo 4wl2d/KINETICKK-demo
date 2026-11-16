@@ -181,7 +181,7 @@ fun skillGlyph(id: SkillId): KkIcon = when (id) {
     SkillId.VOID_STEP -> KkIcon.ASPECT_VOID
     SkillId.SLINGSHOT -> KkIcon.WEAPONS_GYRE_DISC
     SkillId.FULL_STOP -> KkIcon.SYSTEM_BRAKE
-    SkillId.CATALYZE -> KkIcon.TAG_CHAIN
+    SkillId.CATALYZE -> KkIcon.SKILL_CATALYZE
 }
 
 /**

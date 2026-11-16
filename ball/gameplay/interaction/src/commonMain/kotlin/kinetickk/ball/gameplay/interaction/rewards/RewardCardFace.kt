@@ -77,7 +77,7 @@ internal fun RewardCardFace(
         plates?.prepare(this, face, scrollState.value.toFloat())
         val time = if (moving) clock.value else 0f
         drawRewardCardFace(bandMeasurer, presentation, time, selection, facePaths, phoneDeal, look,
-            plates?.textBottom ?: Float.NaN, frame = false, haloImages = haloImages)
+            plates?.textBottom ?: Float.NaN, plates?.footerTop ?: Float.NaN, frame = false, haloImages = haloImages)
         if (plates != null) {
             drawRewardFacePlates(plates, paths.slab(0, RewardFaceSpecs.bounds(size.width, size.height), RewardCardCutDp.dp.toPx(), KkSlabKind.SLAB))
         }
@@ -101,6 +101,7 @@ internal fun DrawScope.drawRewardCardFace(
     look: RewardCardLook = rewardCardLook(presentation, measurer.roles),
     /** The bottom of the card's text in px (the face plates measure it); NaN for the default layout. */
     textBottom: Float = Float.NaN,
+    footerTop: Float = Float.NaN,
     /** Draw the rarity frame too; a caller that lays plates over the face draws it after them ([drawKkCardFrame]). */
     frame: Boolean = true,
     haloImages: KkCardHaloImages? = null,
@@ -111,6 +112,7 @@ internal fun DrawScope.drawRewardCardFace(
     val bounds = RewardFaceSpecs.bounds(size.width, size.height)
     val style = look.style
     drawKkCardBack(bounds, time, selection, style, textBottom, haloImages = haloImages)
+    drawCardScene(look, paths, bounds, bandHeight * density, textBottom, footerTop)
     // The text column's left edge and the text's bottom: ornaments and facets keep clear of the text.
     drawKkCardFront(measurer, bounds, time, presentation.bandStart, bandEnd, bandHeight, style,
         textLeft = spec.start * spec.u * density, textBottom = textBottom)
@@ -122,6 +124,30 @@ internal fun DrawScope.drawRewardCardFace(
         drawPath(outline, Kk.Line2, style = RewardCardStrokes.dashed(1.5f * density, density))
     }
     if (frame) drawKkCardFrame(bounds, time, style)
+}
+
+/** Keep the scene anchored below the card's copy, within the existing face and frame. */
+private fun DrawScope.drawCardScene(
+    look: RewardCardLook,
+    paths: KkPathCache,
+    bounds: Rect,
+    bandBottom: Float,
+    textBottom: Float,
+    footerTop: Float,
+) {
+    val scene = look.scene ?: return
+    val ink = look.sceneInk ?: return
+    val bottom = if (footerTop.isFinite()) min(bounds.bottom - 6f * density, footerTop - 3f * density) else bounds.bottom - 6f * density
+    val width = bounds.width * if (scene == RewardScene.DIAL) 0.92f else 0.75f
+    val room = bottom - bandBottom
+    if (room <= 0f) return
+    val preferred = min(width * 0.64f, room * 0.42f)
+    val spaceAfterText = if (textBottom.isFinite()) bottom - textBottom - 5f * density else preferred
+    val height = spaceAfterText.coerceIn(preferred * 0.58f, preferred)
+    val left = bounds.right - width - 8f * density
+    val inset = 5f * density
+    val face = paths.slab(2, bounds.left + inset, bandBottom, bounds.right - inset, bottom, RewardCardCutDp * density)
+    clipPath(face) { drawRewardScene(scene, ink, left, bottom - height, width, height) }
 }
 
 /** Card specs and face bounds of the face canvases drawn this frame, so a steady face allocates none. */
@@ -163,7 +189,6 @@ internal object RewardFaceSpecs {
     }
 }
 
-/** Art cache for faces drawn outside a card composable (tests, previews). Draw-thread confined. */
 /**
  * Type pips on the band's trailing end, before the stack count: a diamond per element with its
  * glyph, or one volt Kinetic pip for an item without an element (Kinetic is a type like the others).
@@ -247,6 +272,10 @@ internal class RewardFacePlates {
     var textBottom = Float.NaN
         private set
 
+    /** The measured top edge of the preview/footer chips, when present. */
+    var footerTop = Float.NaN
+        private set
+
     private var builtVersion = -1
     private var builtFace = Color.Unspecified
     private var builtWidth = -1f
@@ -300,7 +329,9 @@ internal class RewardFacePlates {
         val sameFace = face == builtFace
         var next = 0
         var bottom = Float.NaN
+        var footer = Float.NaN
         for ((key, bounds, row) in measured) {
+            if (key == "footer") footer = bounds.top
             if (key != "chips" && key != "footer") {
                 val unscrolled = min(bounds.bottom + scroll, viewport.bottom)
                 bottom = if (bottom.isNaN()) unscrolled else max(bottom, unscrolled)
@@ -323,6 +354,7 @@ internal class RewardFacePlates {
         for (index in next until built.size) built[index] = null
         count = next
         textBottom = bottom
+        footerTop = footer
         builtVersion = stamp
         builtFace = face
         builtWidth = scope.size.width
