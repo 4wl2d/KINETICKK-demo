@@ -37,6 +37,7 @@ SOURCE_PATHS = tuple(re.compile(pattern) for pattern in (
     r"(?:README(?:\.ru)?\.md|AGENTS\.md)",
     r"\.(?:gitattributes|gitignore)",
     r"docs/(?:DEVELOPMENT|DEMO|ASSETS)\.md",
+    r"docs/assets/readme/(?:hero|facts|modules|frame|button-(?:play|releases|build))\.svg",
     r"\.github/(?:workflows/ci\.yml|scripts/(?:test_)?web_release\.py)",
     r"tools/(?:check_demo\.py|demo-assets\.sha256)",
     r"(?:settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|gradlew(?:\.bat)?)",
